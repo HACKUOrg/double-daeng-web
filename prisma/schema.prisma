@@ -1,0 +1,393 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SA
+  MANAGER
+  OPERATION
+  CUSTOMER
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AssetType {
+  DORMITORY
+  CONDO
+  APARTMENT
+  MIXED
+}
+
+enum AssetStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum RoomStatus {
+  VACANT
+  OCCUPIED
+  MAINTENANCE
+  UNAVAILABLE
+}
+
+enum CustomerProfileStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum RoomAssignmentStatus {
+  ACTIVE
+  MOVED_OUT
+  CANCELLED
+}
+
+enum ContractStatus {
+  DRAFT
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum MeterType {
+  WATER
+  ELECTRIC
+}
+
+enum MaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum MaintenanceStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+model User {
+  id          String     @id @default(uuid()) @db.Uuid
+  authUserId  String     @unique @map("auth_user_id") @db.Uuid
+  email       String     @unique
+  displayName String     @map("display_name")
+  role        UserRole
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships                 OrganizationMembership[]
+  auditLogs                   AuditLog[]               @relation("AuditActor")
+  customerProfiles            CustomerProfile[]
+  createdMaintenanceRequests  MaintenanceRequest[]     @relation("MaintenanceCreatedBy")
+  assignedMaintenanceRequests MaintenanceRequest[]     @relation("MaintenanceAssignedTo")
+  uploadedAttachments         Attachment[]             @relation("AttachmentUploader")
+
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model Organization {
+  id        String             @id @default(uuid()) @db.Uuid
+  name      String
+  status    OrganizationStatus @default(ACTIVE)
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships         OrganizationMembership[]
+  assets              Asset[]
+  auditLogs           AuditLog[]
+  customerProfiles    CustomerProfile[]
+  roomAssignments     RoomAssignment[]
+  contracts           Contract[]
+  invoices            Invoice[]
+  meterReadings       MeterReading[]
+  maintenanceRequests MaintenanceRequest[]
+  attachments         Attachment[]
+
+  @@index([status])
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("organization_memberships")
+}
+
+model Asset {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  name           String
+  type           AssetType
+  status         AssetStatus @default(ACTIVE)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  buildings    Building[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("assets")
+}
+
+model Building {
+  id        String   @id @default(uuid()) @db.Uuid
+  assetId   String   @map("asset_id") @db.Uuid
+  name      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  asset  Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  floors Floor[]
+
+  @@index([assetId])
+  @@map("buildings")
+}
+
+model Floor {
+  id         String   @id @default(uuid()) @db.Uuid
+  buildingId String   @map("building_id") @db.Uuid
+  name       String
+  number     Int
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  building Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  rooms    Room[]
+
+  @@unique([buildingId, number])
+  @@index([buildingId])
+  @@map("floors")
+}
+
+model Room {
+  id         String     @id @default(uuid()) @db.Uuid
+  floorId    String     @map("floor_id") @db.Uuid
+  roomNumber String     @map("room_number")
+  status     RoomStatus @default(VACANT)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  floor               Floor                @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  assignments         RoomAssignment[]
+  meterReadings       MeterReading[]
+  maintenanceRequests MaintenanceRequest[]
+
+  @@unique([floorId, roomNumber])
+  @@index([status])
+  @@map("rooms")
+}
+
+model CustomerProfile {
+  id               String                @id @default(uuid()) @db.Uuid
+  organizationId   String                @map("organization_id") @db.Uuid
+  userId           String?               @map("user_id") @db.Uuid
+  customerCode     String                @map("customer_code")
+  fullName         String                @map("full_name")
+  phone            String?
+  emergencyContact String?               @map("emergency_contact")
+  status           CustomerProfileStatus @default(ACTIVE)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  assignments         RoomAssignment[]
+  invoices            Invoice[]
+  maintenanceRequests MaintenanceRequest[]
+
+  @@unique([organizationId, customerCode])
+  @@index([organizationId, status])
+  @@index([userId])
+  @@map("customer_profiles")
+}
+
+model RoomAssignment {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @map("organization_id") @db.Uuid
+  roomId            String               @map("room_id") @db.Uuid
+  customerProfileId String               @map("customer_profile_id") @db.Uuid
+  status            RoomAssignmentStatus @default(ACTIVE)
+  moveInDate        DateTime             @map("move_in_date") @db.Date
+  moveOutDate       DateTime?            @map("move_out_date") @db.Date
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  room            Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  contract        Contract?
+  invoices        Invoice[]
+
+  @@index([organizationId, status])
+  @@index([roomId, status])
+  @@index([customerProfileId, status])
+  @@map("room_assignments")
+}
+
+model Contract {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  assignmentId   String         @unique @map("assignment_id") @db.Uuid
+  contractNumber String         @map("contract_number")
+  startDate      DateTime       @map("start_date") @db.Date
+  endDate        DateTime?      @map("end_date") @db.Date
+  rentAmount     Decimal        @map("rent_amount") @db.Decimal(12, 2)
+  depositAmount  Decimal        @default(0) @map("deposit_amount") @db.Decimal(12, 2)
+  status         ContractStatus @default(ACTIVE)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignment   RoomAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, contractNumber])
+  @@index([organizationId, status])
+  @@map("contracts")
+}
+
+model Invoice {
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @map("organization_id") @db.Uuid
+  customerProfileId String        @map("customer_profile_id") @db.Uuid
+  roomAssignmentId  String?       @map("room_assignment_id") @db.Uuid
+  invoiceNumber     String        @map("invoice_number")
+  issueDate         DateTime      @map("issue_date") @db.Date
+  dueDate           DateTime      @map("due_date") @db.Date
+  totalAmount       Decimal       @map("total_amount") @db.Decimal(12, 2)
+  status            InvoiceStatus @default(ISSUED)
+  paidAt            DateTime?     @map("paid_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  roomAssignment  RoomAssignment? @relation(fields: [roomAssignmentId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status])
+  @@index([customerProfileId])
+  @@index([roomAssignmentId])
+  @@map("invoices")
+}
+
+model MeterReading {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  roomId         String    @map("room_id") @db.Uuid
+  meterType      MeterType @map("meter_type")
+  readingDate    DateTime  @map("reading_date") @db.Date
+  readingValue   Decimal   @map("reading_value") @db.Decimal(12, 2)
+  note           String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  room         Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, meterType, readingDate])
+  @@index([organizationId, meterType, readingDate])
+  @@map("meter_readings")
+}
+
+model MaintenanceRequest {
+  id                String              @id @default(uuid()) @db.Uuid
+  organizationId    String              @map("organization_id") @db.Uuid
+  roomId            String?             @map("room_id") @db.Uuid
+  customerProfileId String?             @map("customer_profile_id") @db.Uuid
+  createdByUserId   String?             @map("created_by_user_id") @db.Uuid
+  assignedToUserId  String?             @map("assigned_to_user_id") @db.Uuid
+  title             String
+  description       String
+  priority          MaintenancePriority @default(MEDIUM)
+  status            MaintenanceStatus   @default(OPEN)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  room            Room?            @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  customerProfile CustomerProfile? @relation(fields: [customerProfileId], references: [id], onDelete: SetNull)
+  createdBy       User?            @relation("MaintenanceCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  assignedTo      User?            @relation("MaintenanceAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([roomId])
+  @@index([customerProfileId])
+  @@index([createdByUserId])
+  @@index([assignedToUserId])
+  @@map("maintenance_requests")
+}
+
+model Attachment {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  entityType       String   @map("entity_type")
+  entityId         String   @map("entity_id") @db.Uuid
+  fileName         String   @map("file_name")
+  storagePath      String   @map("storage_path")
+  mimeType         String?  @map("mime_type")
+  sizeBytes        Int?     @map("size_bytes")
+  uploadedByUserId String?  @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation("AttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, entityType, entityId])
+  @@index([uploadedByUserId])
+  @@map("attachments")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  action         String
+  entityType     String   @map("entity_type")
+  entityId       String   @map("entity_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  before         Json?
+  after          Json?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor        User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([organizationId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
