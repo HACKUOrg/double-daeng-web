@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "double-daeng-web",
+  title: "Double Daeng",
   description: "Dormitory, condo, and apartment management SaaS"
 };
 

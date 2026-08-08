@@ -1,4 +1,5 @@
-import { Building2, LogIn } from "lucide-react";
+import { LogIn } from "lucide-react";
+import { BrandLogo } from "@/components/brand-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { signInWithPassword } from "./actions";
@@ -22,14 +23,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     <main className="flex min-h-screen items-center justify-center px-6 py-10">
       <section className="w-full max-w-[420px] rounded-lg border bg-card p-6 shadow-sm">
         <div className="mb-8 flex items-center gap-3">
-          <div className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Building2 className="size-5" aria-hidden="true" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">double-daeng-web</h1>
-            <p className="text-sm text-muted-foreground">Sign in to continue</p>
-          </div>
+          <BrandLogo priority variant="wordmark" className="h-12" />
+          <span className="sr-only">Double Daeng</span>
         </div>
+        <p className="mb-6 text-sm text-muted-foreground">Sign in to continue</p>
 
         <form action={signInWithPassword} className="grid gap-4">
           <label className="grid gap-2 text-sm font-medium">
