@@ -25,13 +25,6 @@ const moneySchema = z
 const organizationStatusSchema = z.enum(["ACTIVE", "SUSPENDED"]);
 const assetTypeSchema = z.enum(["DORMITORY", "CONDO", "APARTMENT", "MIXED"]);
 const assetStatusSchema = z.enum(["ACTIVE", "SUSPENDED"]);
-const roomStatusSchema = z.enum([
-  "VACANT",
-  "OCCUPIED",
-  "MAINTENANCE",
-  "UNAVAILABLE"
-]);
-
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" ? value : "";
@@ -874,16 +867,14 @@ export async function createRoom(formData: FormData) {
       floorId: uuidSchema,
       roomNumber: nameSchema,
       rentAmount: moneySchema,
-      depositAmount: moneySchema,
-      status: roomStatusSchema
+      depositAmount: moneySchema
     })
     .safeParse({
       organizationId: getString(formData, "organizationId"),
       floorId: getString(formData, "floorId"),
       roomNumber: getString(formData, "roomNumber"),
       rentAmount: getString(formData, "rentAmount") || "0",
-      depositAmount: getString(formData, "depositAmount") || "0",
-      status: getString(formData, "status") || "VACANT"
+      depositAmount: getString(formData, "depositAmount") || "0"
     });
 
   if (!parsed.success) {
@@ -919,8 +910,7 @@ export async function createRoom(formData: FormData) {
         floorId: parsed.data.floorId,
         roomNumber: parsed.data.roomNumber,
         rentAmount: parsed.data.rentAmount,
-        depositAmount: parsed.data.depositAmount,
-        status: parsed.data.status
+        depositAmount: parsed.data.depositAmount
       },
       select: {
         id: true,
@@ -954,16 +944,14 @@ export async function updateRoom(formData: FormData) {
       roomId: uuidSchema,
       roomNumber: nameSchema,
       rentAmount: moneySchema,
-      depositAmount: moneySchema,
-      status: roomStatusSchema
+      depositAmount: moneySchema
     })
     .safeParse({
       organizationId: getString(formData, "organizationId"),
       roomId: getString(formData, "roomId"),
       roomNumber: getString(formData, "roomNumber"),
       rentAmount: getString(formData, "rentAmount") || "0",
-      depositAmount: getString(formData, "depositAmount") || "0",
-      status: getString(formData, "status")
+      depositAmount: getString(formData, "depositAmount") || "0"
     });
 
   if (!parsed.success) {
@@ -1009,8 +997,7 @@ export async function updateRoom(formData: FormData) {
       data: {
         roomNumber: parsed.data.roomNumber,
         rentAmount: parsed.data.rentAmount,
-        depositAmount: parsed.data.depositAmount,
-        status: parsed.data.status
+        depositAmount: parsed.data.depositAmount
       },
       select: {
         id: true,

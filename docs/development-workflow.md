@@ -57,7 +57,8 @@ Resident dashboard model.
 
 The Phase 8 core operations verifier checks operational table writes, server
 actions, role-specific `/app/operations` views, organization scope blocking,
-and audit rows for move-in, stay, invoice, meter, and maintenance workflows.
+and audit rows for reservation, move-in, move-out, stay, invoice, meter, room
+status, and maintenance workflows.
 
 When a dedicated non-SA Supabase Auth test user is available, set
 `PHASE3_APP_EMAIL` and `PHASE3_APP_PASSWORD`, then run:

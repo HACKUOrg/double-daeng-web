@@ -16,6 +16,10 @@ const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
   .transform((value) => new Date(`${value}T00:00:00.000Z`));
+const optionalDateSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  dateSchema.optional()
+);
 const moneySchema = z
   .string()
   .trim()
@@ -36,6 +40,8 @@ const maintenanceStatusSchema = z.enum([
   "RESOLVED",
   "CANCELLED"
 ]);
+const moveOutDateSchema = dateSchema;
+const optionalUuidSchema = z.union([uuidSchema, z.literal("")]).optional();
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -127,6 +133,39 @@ async function getRoomInOrganization({
   });
 }
 
+async function getReservationInOrganization({
+  organizationId,
+  prisma,
+  reservationId
+}: {
+  organizationId: string;
+  prisma: ReturnType<typeof getPrisma>;
+  reservationId: string;
+}) {
+  return prisma.roomReservation.findFirst({
+    where: {
+      id: reservationId,
+      organizationId,
+      status: "ACTIVE"
+    },
+    include: {
+      room: {
+        include: {
+          floor: {
+            include: {
+              building: {
+                include: {
+                  asset: true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
 async function getAssignmentInOrganization({
   assignmentId,
   organizationId,
@@ -174,7 +213,8 @@ export async function assignRoom(formData: FormData) {
   const parsed = z
     .object({
       roomId: uuidSchema,
-      residentFullName: textSchema,
+      reservationId: optionalUuidSchema,
+      residentFullName: z.string().trim().max(160).optional(),
       residentPhone: optionalTextSchema,
       emergencyContact: optionalTextSchema,
       moveInDate: dateSchema,
@@ -183,6 +223,7 @@ export async function assignRoom(formData: FormData) {
     })
     .safeParse({
       roomId: getString(formData, "roomId"),
+      reservationId: getString(formData, "reservationId"),
       residentFullName: getString(formData, "residentFullName"),
       residentPhone: getOptionalString(formData, "residentPhone"),
       emergencyContact: getOptionalString(formData, "emergencyContact"),
@@ -195,12 +236,20 @@ export async function assignRoom(formData: FormData) {
     invalidOperation(organizationId);
   }
 
-  const [room, activeRoomAssignment] = await Promise.all([
+  const reservationId = parsed.data.reservationId || null;
+  const [room, reservation, activeRoomAssignment] = await Promise.all([
     getRoomInOrganization({
       organizationId,
       prisma,
       roomId: parsed.data.roomId
     }),
+    reservationId
+      ? getReservationInOrganization({
+          organizationId,
+          prisma,
+          reservationId
+        })
+      : null,
     prisma.roomAssignment.findFirst({
       where: {
         roomId: parsed.data.roomId,
@@ -213,6 +262,21 @@ export async function assignRoom(formData: FormData) {
     invalidOperation(organizationId);
   }
 
+  if (reservationId) {
+    if (!reservation || reservation.roomId !== room.id || room.status !== "RESERVED") {
+      invalidOperation(organizationId);
+    }
+  } else if (room.status !== "VACANT" || !parsed.data.residentFullName?.trim()) {
+    invalidOperation(organizationId);
+  }
+
+  const residentFullName = reservation?.reserverName ?? parsed.data.residentFullName?.trim();
+  const residentPhone = reservation?.reserverPhone ?? parsed.data.residentPhone;
+
+  if (!residentFullName) {
+    invalidOperation(organizationId);
+  }
+
   const loginUsername =
     `${room.floor.building.asset.abbreviation}${room.roomNumber}`.toUpperCase();
   const loginEmail = `${loginUsername.toLowerCase()}@rooms.double-daeng.local`;
@@ -222,13 +286,16 @@ export async function assignRoom(formData: FormData) {
         username: loginUsername
       },
       select: {
-        id: true
+        id: true,
+        authUserId: true,
+        status: true
       }
     }),
     prisma.roomAssignment.findFirst({
       where: {
         organizationId,
-        residentCode: loginUsername
+        residentCode: loginUsername,
+        status: "ACTIVE"
       },
       select: {
         id: true
@@ -236,47 +303,91 @@ export async function assignRoom(formData: FormData) {
     })
   ]);
 
-  if (existingLoginUser || existingResidentCode) {
+  if (existingLoginUser?.status === "ACTIVE" || existingResidentCode) {
     invalidOperation(organizationId);
   }
 
   const supabaseAdmin = createAdminClient();
-  const { data, error } = await supabaseAdmin.auth.admin.createUser({
-    email: loginEmail,
-    password: parsed.data.idDocumentNumber,
-    email_confirm: true,
-    app_metadata: {
-      role: "RESIDENT",
-      status: "ACTIVE",
-      login_type: "room"
-    },
-    user_metadata: {
-      display_name: loginUsername
-    }
-  });
-  const authUserId = data.user?.id;
-
-  if (error || !authUserId) {
-    invalidOperation(organizationId);
-  }
-
+  let authUserId = existingLoginUser?.authUserId ?? null;
+  let createdAuthUserId: string | null = null;
   let assignmentId: string | null = null;
+
+  if (authUserId) {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+      password: parsed.data.idDocumentNumber,
+      app_metadata: {
+        role: "RESIDENT",
+        status: "ACTIVE",
+        login_type: "room"
+      },
+      user_metadata: {
+        display_name: loginUsername
+      }
+    });
+
+    if (error) {
+      invalidOperation(organizationId);
+    }
+  } else {
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+      email: loginEmail,
+      password: parsed.data.idDocumentNumber,
+      email_confirm: true,
+      app_metadata: {
+        role: "RESIDENT",
+        status: "ACTIVE",
+        login_type: "room"
+      },
+      user_metadata: {
+        display_name: loginUsername
+      }
+    });
+
+    authUserId = data.user?.id ?? null;
+    createdAuthUserId = authUserId;
+
+    if (error || !authUserId) {
+      invalidOperation(organizationId);
+    }
+  }
 
   try {
     const assignment = await prisma.$transaction(async (tx) => {
-      const loginUser = await tx.user.create({
-        data: {
-          authUserId,
-          email: loginEmail,
-          username: loginUsername,
-          displayName: loginUsername,
-          role: "RESIDENT",
-          status: "ACTIVE",
-          memberships: {
-            create: {
-              organizationId
+      const loginUser = existingLoginUser
+        ? await tx.user.update({
+            where: {
+              id: existingLoginUser.id
+            },
+            data: {
+              email: loginEmail,
+              username: loginUsername,
+              displayName: loginUsername,
+              role: "RESIDENT",
+              status: "ACTIVE"
             }
+          })
+        : await tx.user.create({
+            data: {
+              authUserId,
+              email: loginEmail,
+              username: loginUsername,
+              displayName: loginUsername,
+              role: "RESIDENT",
+              status: "ACTIVE"
+            }
+          });
+
+      await tx.organizationMembership.upsert({
+        where: {
+          userId_organizationId: {
+            userId: loginUser.id,
+            organizationId
           }
+        },
+        update: {},
+        create: {
+          userId: loginUser.id,
+          organizationId
         }
       });
 
@@ -286,8 +397,8 @@ export async function assignRoom(formData: FormData) {
           roomId: parsed.data.roomId,
           loginUserId: loginUser.id,
           residentCode: loginUsername,
-          residentFullName: parsed.data.residentFullName,
-          residentPhone: parsed.data.residentPhone,
+          residentFullName,
+          residentPhone,
           emergencyContact: parsed.data.emergencyContact,
           idDocumentNumber: parsed.data.idDocumentNumber,
           moveInDate: parsed.data.moveInDate
@@ -316,6 +427,30 @@ export async function assignRoom(formData: FormData) {
         });
       }
 
+      if (reservation) {
+        await tx.roomReservation.update({
+          where: {
+            id: reservation.id
+          },
+          data: {
+            status: "CONVERTED"
+          }
+        });
+
+        await writeAuditLog(tx, {
+          actorUserId: actor.id,
+          action: "room_reservation.convert",
+          entityType: "room_reservation",
+          entityId: reservation.id,
+          organizationId,
+          before: reservation,
+          after: {
+            status: "CONVERTED",
+            assignmentId: created.id
+          }
+        });
+      }
+
       await writeAuditLog(tx, {
         actorUserId: actor.id,
         action: "room_assignment.create",
@@ -326,7 +461,9 @@ export async function assignRoom(formData: FormData) {
           assignment: created,
           loginUsername,
           roomNumber: room.roomNumber,
-          resident: parsed.data.residentFullName
+          resident: residentFullName,
+          previousRoomStatus: room.status,
+          status: "OCCUPIED"
         }
       });
 
@@ -335,7 +472,9 @@ export async function assignRoom(formData: FormData) {
 
     assignmentId = assignment.id;
   } catch (error) {
-    await supabaseAdmin.auth.admin.deleteUser(authUserId);
+    if (createdAuthUserId) {
+      await supabaseAdmin.auth.admin.deleteUser(createdAuthUserId);
+    }
     throw error;
   }
 
@@ -349,6 +488,293 @@ export async function assignRoom(formData: FormData) {
       assignmentId,
       status: "OCCUPIED"
     }
+  });
+
+  revalidateOperations(organizationId);
+}
+
+export async function moveOutRoom(formData: FormData) {
+  const { actor, organizationId, prisma } = await resolveOperationContext({
+    formData,
+    permissions: ["customers.manage", "rooms.manage"]
+  });
+  const parsed = z
+    .object({
+      assignmentId: uuidSchema,
+      moveOutDate: moveOutDateSchema
+    })
+    .safeParse({
+      assignmentId: getString(formData, "assignmentId"),
+      moveOutDate: getString(formData, "moveOutDate")
+    });
+
+  if (!parsed.success) {
+    invalidOperation(organizationId);
+  }
+
+  const before = await prisma.roomAssignment.findFirst({
+    where: {
+      id: parsed.data.assignmentId,
+      organizationId,
+      status: "ACTIVE"
+    },
+    include: {
+      loginUser: true,
+      room: true
+    }
+  });
+
+  if (!before || before.room.status !== "OCCUPIED") {
+    invalidOperation(organizationId);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const after = await tx.roomAssignment.update({
+      where: {
+        id: before.id
+      },
+      data: {
+        status: "MOVED_OUT",
+        moveOutDate: parsed.data.moveOutDate
+      }
+    });
+
+    await tx.room.update({
+      where: {
+        id: before.roomId
+      },
+      data: {
+        status: "VACANT"
+      }
+    });
+
+    if (before.loginUserId) {
+      await tx.user.update({
+        where: {
+          id: before.loginUserId
+        },
+        data: {
+          status: "SUSPENDED"
+        }
+      });
+    }
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "room_assignment.move_out",
+      entityType: "room_assignment",
+      entityId: before.id,
+      organizationId,
+      before,
+      after: {
+        assignment: after,
+        roomStatus: "VACANT"
+      }
+    });
+  });
+
+  if (before.loginUser?.authUserId) {
+    const { error } = await createAdminClient().auth.admin.updateUserById(
+      before.loginUser.authUserId,
+      {
+        app_metadata: {
+          role: "RESIDENT",
+          status: "SUSPENDED",
+          login_type: "room"
+        }
+      }
+    );
+
+    if (error) {
+      invalidOperation(organizationId);
+    }
+  }
+
+  revalidateOperations(organizationId);
+}
+
+export async function reserveRoom(formData: FormData) {
+  const { actor, organizationId, prisma } = await resolveOperationContext({
+    formData,
+    permissions: ["customers.manage"]
+  });
+  const parsed = z
+    .object({
+      roomId: uuidSchema,
+      reserverName: textSchema,
+      reserverPhone: optionalTextSchema,
+      reservedDate: dateSchema,
+      expectedMoveInDate: optionalDateSchema,
+      note: optionalTextSchema
+    })
+    .safeParse({
+      roomId: getString(formData, "roomId"),
+      reserverName: getString(formData, "reserverName"),
+      reserverPhone: getOptionalString(formData, "reserverPhone"),
+      reservedDate: getString(formData, "reservedDate"),
+      expectedMoveInDate: getString(formData, "expectedMoveInDate"),
+      note: getOptionalString(formData, "note")
+    });
+
+  if (!parsed.success) {
+    invalidOperation(organizationId);
+  }
+
+  const [room, activeReservation] = await Promise.all([
+    getRoomInOrganization({
+      organizationId,
+      prisma,
+      roomId: parsed.data.roomId
+    }),
+    prisma.roomReservation.findFirst({
+      where: {
+        roomId: parsed.data.roomId,
+        status: "ACTIVE"
+      }
+    })
+  ]);
+
+  if (!room || room.status !== "VACANT" || activeReservation) {
+    invalidOperation(organizationId);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const reservation = await tx.roomReservation.create({
+      data: {
+        organizationId,
+        roomId: parsed.data.roomId,
+        reservedByUserId: actor.id,
+        reserverName: parsed.data.reserverName,
+        reserverPhone: parsed.data.reserverPhone,
+        reservedDate: parsed.data.reservedDate,
+        expectedMoveInDate: parsed.data.expectedMoveInDate,
+        note: parsed.data.note
+      }
+    });
+
+    await tx.room.update({
+      where: {
+        id: parsed.data.roomId
+      },
+      data: {
+        status: "RESERVED"
+      }
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "room_reservation.create",
+      entityType: "room_reservation",
+      entityId: reservation.id,
+      organizationId,
+      after: {
+        reservation,
+        previousRoomStatus: room.status,
+        status: "RESERVED"
+      }
+    });
+  });
+
+  revalidateOperations(organizationId);
+}
+
+export async function cancelReservation(formData: FormData) {
+  const { actor, organizationId, prisma } = await resolveOperationContext({
+    formData,
+    permissions: ["customers.manage"]
+  });
+  const parsed = uuidSchema.safeParse(getString(formData, "reservationId"));
+
+  if (!parsed.success) {
+    invalidOperation(organizationId);
+  }
+
+  const reservation = await getReservationInOrganization({
+    organizationId,
+    prisma,
+    reservationId: parsed.data
+  });
+
+  if (!reservation || reservation.room.status !== "RESERVED") {
+    invalidOperation(organizationId);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const after = await tx.roomReservation.update({
+      where: {
+        id: reservation.id
+      },
+      data: {
+        status: "CANCELLED"
+      }
+    });
+
+    await tx.room.update({
+      where: {
+        id: reservation.roomId
+      },
+      data: {
+        status: "VACANT"
+      }
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "room_reservation.cancel",
+      entityType: "room_reservation",
+      entityId: reservation.id,
+      organizationId,
+      before: reservation,
+      after: {
+        reservation: after,
+        roomStatus: "VACANT"
+      }
+    });
+  });
+
+  revalidateOperations(organizationId);
+}
+
+export async function markRoomUnavailable(formData: FormData) {
+  const { actor, organizationId, prisma } = await resolveOperationContext({
+    formData,
+    permissions: ["rooms.manage"]
+  });
+  const parsed = uuidSchema.safeParse(getString(formData, "roomId"));
+
+  if (!parsed.success) {
+    invalidOperation(organizationId);
+  }
+
+  const room = await getRoomInOrganization({
+    organizationId,
+    prisma,
+    roomId: parsed.data
+  });
+
+  if (!room || room.status !== "VACANT") {
+    invalidOperation(organizationId);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const after = await tx.room.update({
+      where: {
+        id: room.id
+      },
+      data: {
+        status: "UNAVAILABLE"
+      }
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "room.unavailable",
+      entityType: "room",
+      entityId: room.id,
+      organizationId,
+      before: room,
+      after
+    });
   });
 
   revalidateOperations(organizationId);
@@ -482,8 +908,8 @@ export async function createMaintenanceRequest(formData: FormData) {
     });
   const parsed = z
     .object({
-      roomId: z.union([uuidSchema, z.literal("")]).optional(),
-      roomAssignmentId: z.union([uuidSchema, z.literal("")]).optional(),
+      roomId: optionalUuidSchema,
+      roomAssignmentId: optionalUuidSchema,
       title: textSchema,
       description: z.string().trim().min(1).max(1000),
       priority: maintenancePrioritySchema
@@ -501,8 +927,7 @@ export async function createMaintenanceRequest(formData: FormData) {
   }
 
   let roomAssignmentId = parsed.data.roomAssignmentId || null;
-
-  let ownAssignmentRoomId: string | null = null;
+  let targetRoomId = parsed.data.roomId || null;
 
   if (actorRole === "RESIDENT") {
     const ownAssignment = await prisma.roomAssignment.findFirst({
@@ -522,7 +947,7 @@ export async function createMaintenanceRequest(formData: FormData) {
     }
 
     roomAssignmentId = ownAssignment.id;
-    ownAssignmentRoomId = ownAssignment.roomId;
+    targetRoomId = ownAssignment.roomId;
   } else if (roomAssignmentId) {
     const assignment = await getAssignmentInOrganization({
       assignmentId: roomAssignmentId,
@@ -533,45 +958,67 @@ export async function createMaintenanceRequest(formData: FormData) {
     if (!assignment) {
       invalidOperation(organizationId);
     }
+
+    targetRoomId ??= assignment.roomId;
   }
 
-  const roomId = parsed.data.roomId || null;
-
-  if (actorRole === "RESIDENT" && roomId && roomId !== ownAssignmentRoomId) {
-    forbiddenOperation(organizationId);
+  if (!targetRoomId) {
+    invalidOperation(organizationId);
   }
 
-  if (roomId) {
-    const room = await getRoomInOrganization({
-      organizationId,
-      prisma,
-      roomId
-    });
+  let previousRoomStatus: "VACANT" | "OCCUPIED" | null = null;
 
-    if (!room) {
-      invalidOperation(organizationId);
-    }
-  }
-
-  const request = await prisma.maintenanceRequest.create({
-    data: {
-      organizationId,
-      roomId,
-      roomAssignmentId,
-      createdByUserId: actor.id,
-      title: parsed.data.title,
-      description: parsed.data.description,
-      priority: parsed.data.priority
-    }
+  const room = await getRoomInOrganization({
+    organizationId,
+    prisma,
+    roomId: targetRoomId
   });
 
-  await writeAuditLog(prisma, {
-    actorUserId: actor.id,
-    action: "maintenance_request.create",
-    entityType: "maintenance_request",
-    entityId: request.id,
-    organizationId,
-    after: request
+  if (!room) {
+    invalidOperation(organizationId);
+  }
+
+  if (room.status !== "VACANT" && room.status !== "OCCUPIED") {
+    invalidOperation(organizationId);
+  }
+
+  previousRoomStatus = room.status;
+
+  await prisma.$transaction(async (tx) => {
+    const request = await tx.maintenanceRequest.create({
+      data: {
+        organizationId,
+        roomId: targetRoomId,
+        roomAssignmentId,
+        createdByUserId: actor.id,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        priority: parsed.data.priority,
+        previousRoomStatus
+      }
+    });
+
+    await tx.room.update({
+      where: {
+        id: targetRoomId
+      },
+      data: {
+        status: "MAINTENANCE"
+      }
+    });
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "maintenance_request.create",
+      entityType: "maintenance_request",
+      entityId: request.id,
+      organizationId,
+      after: {
+        request,
+        previousRoomStatus,
+        roomStatus: "MAINTENANCE"
+      }
+    });
   });
 
   revalidateOperations(organizationId);
@@ -609,6 +1056,13 @@ export async function updateMaintenanceStatus(formData: FormData) {
     invalidOperation(organizationId);
   }
 
+  if (
+    (before.status === "RESOLVED" || before.status === "CANCELLED") &&
+    (parsed.data.status === "OPEN" || parsed.data.status === "IN_PROGRESS")
+  ) {
+    invalidOperation(organizationId);
+  }
+
   const assignedToUserId = parsed.data.assignedToUserId || null;
 
   if (assignedToUserId) {
@@ -632,24 +1086,65 @@ export async function updateMaintenanceStatus(formData: FormData) {
     }
   }
 
-  const after = await prisma.maintenanceRequest.update({
-    where: {
-      id: before.id
-    },
-    data: {
-      status: parsed.data.status,
-      assignedToUserId
-    }
-  });
+  await prisma.$transaction(async (tx) => {
+    const after = await tx.maintenanceRequest.update({
+      where: {
+        id: before.id
+      },
+      data: {
+        status: parsed.data.status,
+        assignedToUserId
+      }
+    });
 
-  await writeAuditLog(prisma, {
-    actorUserId: actor.id,
-    action: "maintenance_request.update",
-    entityType: "maintenance_request",
-    entityId: after.id,
-    organizationId,
-    before,
-    after
+    const isClosing =
+      (parsed.data.status === "RESOLVED" || parsed.data.status === "CANCELLED") &&
+      before.status !== "RESOLVED" &&
+      before.status !== "CANCELLED";
+
+    if (isClosing && before.roomId && before.previousRoomStatus) {
+      const openSiblingCount = await tx.maintenanceRequest.count({
+        where: {
+          id: {
+            not: before.id
+          },
+          roomId: before.roomId,
+          status: {
+            in: ["OPEN", "IN_PROGRESS"]
+          }
+        }
+      });
+
+      const room = await tx.room.findUnique({
+        where: {
+          id: before.roomId
+        },
+        select: {
+          status: true
+        }
+      });
+
+      if (openSiblingCount === 0 && room?.status === "MAINTENANCE") {
+        await tx.room.update({
+          where: {
+            id: before.roomId
+          },
+          data: {
+            status: before.previousRoomStatus
+          }
+        });
+      }
+    }
+
+    await writeAuditLog(tx, {
+      actorUserId: actor.id,
+      action: "maintenance_request.update",
+      entityType: "maintenance_request",
+      entityId: after.id,
+      organizationId,
+      before,
+      after
+    });
   });
 
   revalidateOperations(organizationId);

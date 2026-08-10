@@ -30,10 +30,7 @@ export async function signInWithPassword(formData: FormData) {
         status: "ACTIVE",
         roomLoginAssignments: {
           some: {
-            status: "ACTIVE",
-            room: {
-              status: "OCCUPIED"
-            }
+            status: "ACTIVE"
           }
         }
       },

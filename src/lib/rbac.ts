@@ -41,7 +41,7 @@ export const permissionLabels: Record<Permission, string> = {
   "assets.manage": "Manage assets, buildings, floors, and rooms",
   "rooms.manage": "Manage rooms",
   "customers.manage": "Manage customers",
-  "room_status.update": "Update room status",
+  "room_status.update": "Run room status actions",
   "maintenance.manage": "Manage maintenance work",
   "own_data.view": "View own data",
   "maintenance.create": "Create maintenance request"

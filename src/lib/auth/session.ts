@@ -50,10 +50,7 @@ export async function requireProfile() {
     const activeAssignment = await prisma.roomAssignment.findFirst({
       where: {
         loginUserId: profile.id,
-        status: "ACTIVE",
-        room: {
-          status: "OCCUPIED"
-        }
+        status: "ACTIVE"
       },
       select: {
         id: true

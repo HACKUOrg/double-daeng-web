@@ -48,8 +48,9 @@ foundation is now in progress:
 - Permission guards protect route layouts, pages, and key server actions.
 - `/admin/audit` shows recent audit rows with filters and before/after
   snapshots.
-- `/app/operations` supports Phase 8 move-ins, active stays, contract records,
-  invoices, meter readings, and maintenance requests.
+- `/app/operations` supports Phase 8 reservations, move-ins, move-outs, active
+  stays, contract records, invoices, meter readings, maintenance requests, and
+  action-driven room status changes.
 
 The database is not connected until `.env.local` is filled with a real Supabase
 project and migrations are applied.

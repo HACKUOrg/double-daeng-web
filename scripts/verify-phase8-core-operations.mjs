@@ -32,7 +32,9 @@ const ids = {
   building: randomUUID(),
   floor: randomUUID(),
   roomOne: randomUUID(),
-  roomTwo: randomUUID()
+  roomTwo: randomUUID(),
+  roomThree: randomUUID(),
+  roomFour: randomUUID()
 };
 const suffix = ids.organization.slice(0, 8);
 const fixture = {
@@ -51,7 +53,10 @@ const fixture = {
   residentPassword: `123456${suffix}`,
   residentCode: `P8${suffix.slice(0, 4)}801`.toUpperCase(),
   residentFullName: `Phase8 Resident ${suffix}`,
+  reservationPassword: `987654${suffix}`,
+  reservationName: `Reserved Resident ${suffix}`,
   contractNumber: `P8-C-${suffix}`,
+  reservationContractNumber: `P8-RC-${suffix}`,
   invoiceNumber: `P8-I-${suffix}`,
   maintenanceTitle: `Phase8 Leaky Faucet ${suffix}`
 };
@@ -210,16 +215,18 @@ async function createFixture(client) {
       insert into public.rooms (id, floor_id, room_number, rent_amount, deposit_amount, status, updated_at)
       values
         ($1, $3, '801', 12000.00, 24000.00, 'VACANT', now()),
-        ($2, $3, '802', 13000.00, 26000.00, 'VACANT', now())
+        ($2, $3, '802', 13000.00, 26000.00, 'VACANT', now()),
+        ($4, $3, '803', 14000.00, 28000.00, 'VACANT', now()),
+        ($5, $3, '804', 15000.00, 30000.00, 'VACANT', now())
     `,
-    [ids.roomOne, ids.roomTwo, ids.floor]
+    [ids.roomOne, ids.roomTwo, ids.floor, ids.roomThree, ids.roomFour]
   );
 }
 
 async function cleanupFixture(client) {
   const residentAuthUsers = await client.query(
-    "select auth_user_id from public.users where username = $1",
-    [`${fixture.assetAbbreviation}801`]
+    "select auth_user_id from public.users where username = any($1::text[])",
+    [[`${fixture.assetAbbreviation}801`, `${fixture.assetAbbreviation}803`]]
   );
   await client.query("delete from public.audit_logs where organization_id = $1", [
     ids.organization
@@ -244,9 +251,11 @@ async function cleanupFixture(client) {
   await client.query("delete from public.room_assignments where organization_id = $1", [
     ids.organization
   ]);
-  await client.query("delete from public.rooms where id in ($1, $2)", [
-    ids.roomOne,
-    ids.roomTwo
+  await client.query("delete from public.room_reservations where organization_id = $1", [
+    ids.organization
+  ]);
+  await client.query("delete from public.rooms where id = any($1::uuid[])", [
+    [ids.roomOne, ids.roomTwo, ids.roomThree, ids.roomFour]
   ]);
   await client.query("delete from public.floors where id = $1", [ids.floor]);
   await client.query("delete from public.buildings where id = $1", [ids.building]);
@@ -258,11 +267,14 @@ async function cleanupFixture(client) {
     "delete from public.organization_memberships where organization_id = $1",
     [ids.organization]
   );
-  await client.query("delete from public.users where id in ($1, $2) or username = $3", [
-    ids.managerUser,
-    ids.operationUser,
-    `${fixture.assetAbbreviation}801`
-  ]);
+  await client.query(
+    "delete from public.users where id in ($1, $2) or username = any($3::text[])",
+    [
+      ids.managerUser,
+      ids.operationUser,
+      [`${fixture.assetAbbreviation}801`, `${fixture.assetAbbreviation}803`]
+    ]
+  );
   await client.query("delete from public.organizations where id in ($1, $2)", [
     ids.organization,
     ids.outsideOrganization
@@ -379,6 +391,41 @@ async function getMaintenanceRequestId(client) {
   return id;
 }
 
+async function getReservationId(client, roomId, status = "ACTIVE") {
+  const result = await client.query(
+    "select id from public.room_reservations where organization_id = $1 and room_id = $2 and status = $3",
+    [ids.organization, roomId, status]
+  );
+  const id = result.rows[0]?.id;
+
+  if (!id) {
+    throw new Error(`Room reservation with status ${status} was not found.`);
+  }
+
+  return id;
+}
+
+async function assertRoomStatus(client, roomId, status) {
+  const result = await client.query("select status from public.rooms where id = $1", [
+    roomId
+  ]);
+
+  if (result.rows[0]?.status !== status) {
+    throw new Error(`Expected room ${roomId} status ${status}, got ${result.rows[0]?.status}`);
+  }
+}
+
+async function assertRoomLoginSuspended(client, username) {
+  const result = await client.query(
+    "select status from public.users where username = $1",
+    [username]
+  );
+
+  if (result.rows[0]?.status !== "SUSPENDED") {
+    throw new Error(`Expected room login ${username} to be suspended.`);
+  }
+}
+
 async function assertManagerPage(cookies) {
   const { response, html } = await fetchAuthed(
     `/app/operations?organizationId=${ids.organization}`,
@@ -392,8 +439,11 @@ async function assertManagerPage(cookies) {
   for (const expected of [
     "Core operations",
     "Move-in",
+    "Reserve room",
+    "Reservations",
     "Monthly invoice",
     "Meter reading",
+    "Mark unavailable",
     "Maintenance",
     fixture.organization
   ]) {
@@ -471,8 +521,14 @@ async function assertDatabaseState(client) {
         (select count(*) from public.invoices where organization_id = $1) as invoices,
         (select count(*) from public.meter_readings where organization_id = $1) as meter_readings,
         (select count(*) from public.maintenance_requests where organization_id = $1 and status = 'RESOLVED') as resolved_maintenance,
+        (select count(*) from public.room_reservations where organization_id = $1 and status = 'CANCELLED') as cancelled_reservations,
+        (select count(*) from public.room_reservations where organization_id = $1 and status = 'CONVERTED') as converted_reservations,
+        (select count(*) from public.rooms where id = $3 and status = 'UNAVAILABLE') as unavailable_rooms,
         (select count(*) from public.users where username = $2 and role = 'RESIDENT') as resident_users,
         (select count(*) from public.audit_logs where organization_id = $1 and action in (
+          'room_reservation.create',
+          'room_reservation.cancel',
+          'room_reservation.convert',
           'room_assignment.create',
           'invoice.create',
           'meter_reading.create',
@@ -480,7 +536,7 @@ async function assertDatabaseState(client) {
           'maintenance_request.update'
         )) as audits
     `,
-    [ids.organization, `${fixture.assetAbbreviation}801`]
+    [ids.organization, `${fixture.assetAbbreviation}801`, ids.roomFour]
   );
   const row = result.rows[0];
 
@@ -505,6 +561,53 @@ try {
 
   await assertManagerPage(managerCookies);
   await assertBlockedOutsideScope(managerCookies);
+
+  await postAction(operationsPath, managerCookies, 'name="reservedDate"', {
+    organizationId: ids.organization,
+    roomId: ids.roomTwo,
+    reserverName: `Cancel Reservation ${suffix}`,
+    reserverPhone: "0899999999",
+    reservedDate: "2026-08-08",
+    expectedMoveInDate: "2026-09-01",
+    note: "Cancel verification"
+  });
+  const cancelledReservationId = await getReservationId(client, ids.roomTwo);
+  await assertRoomStatus(client, ids.roomTwo, "RESERVED");
+
+  await postAction(operationsPath, managerCookies, "Cancel reservation", {
+    organizationId: ids.organization,
+    reservationId: cancelledReservationId
+  });
+  await assertRoomStatus(client, ids.roomTwo, "VACANT");
+
+  await postAction(operationsPath, managerCookies, 'name="reservedDate"', {
+    organizationId: ids.organization,
+    roomId: ids.roomThree,
+    reserverName: fixture.reservationName,
+    reserverPhone: "0877777777",
+    reservedDate: "2026-08-08",
+    expectedMoveInDate: "2026-09-08",
+    note: "Convert verification"
+  });
+  const convertedReservationId = await getReservationId(client, ids.roomThree);
+  await assertRoomStatus(client, ids.roomThree, "RESERVED");
+
+  await postAction(operationsPath, managerCookies, convertedReservationId, {
+    organizationId: ids.organization,
+    reservationId: convertedReservationId,
+    roomId: ids.roomThree,
+    moveInDate: "2026-08-09",
+    idDocumentNumber: fixture.reservationPassword,
+    emergencyContact: "Reserved Emergency",
+    contractNumber: fixture.reservationContractNumber
+  });
+  await assertRoomStatus(client, ids.roomThree, "OCCUPIED");
+
+  await postAction(operationsPath, managerCookies, "Mark unavailable", {
+    organizationId: ids.organization,
+    roomId: ids.roomFour
+  });
+  await assertRoomStatus(client, ids.roomFour, "UNAVAILABLE");
 
   await postAction(operationsPath, managerCookies, 'name="moveInDate"', {
     organizationId: ids.organization,
@@ -549,6 +652,7 @@ try {
     priority: "HIGH"
   });
   const maintenanceRequestId = await getMaintenanceRequestId(client);
+  await assertRoomStatus(client, ids.roomOne, "MAINTENANCE");
 
   await postAction(operationsPath, operationCookies, maintenanceRequestId, {
     organizationId: ids.organization,
@@ -556,9 +660,18 @@ try {
     status: "RESOLVED",
     assignedToUserId: ids.operationUser
   });
+  await assertRoomStatus(client, ids.roomOne, "OCCUPIED");
 
   await assertFinalPages({ managerCookies, residentCookies });
   await assertDatabaseState(client);
+
+  await postAction(operationsPath, managerCookies, "Move out", {
+    organizationId: ids.organization,
+    assignmentId,
+    moveOutDate: "2026-10-08"
+  });
+  await assertRoomStatus(client, ids.roomOne, "VACANT");
+  await assertRoomLoginSuspended(client, `${fixture.assetAbbreviation}801`);
 
   console.log("PHASE8_CORE_OPERATIONS_OK");
 } finally {

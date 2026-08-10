@@ -1,19 +1,26 @@
 import {
   Banknote,
+  CalendarCheck,
+  CalendarX,
   ClipboardList,
   DoorOpen,
   FileText,
   Gauge,
   LifeBuoy,
+  LogOut,
   Users,
   Wrench
 } from "lucide-react";
 import { OrganizationSwitcher } from "@/app/app/_components/organization-switcher";
 import {
   assignRoom,
+  cancelReservation,
   createInvoice,
   createMaintenanceRequest,
+  markRoomUnavailable,
+  moveOutRoom,
   recordMeterReading,
+  reserveRoom,
   updateMaintenanceStatus
 } from "@/app/app/operations/actions";
 import { Button } from "@/components/ui/button";
@@ -49,6 +56,7 @@ export default async function OperationsPage({
   const canManageCustomers = hasPermission(role, "customers.manage");
   const canManageMaintenance = hasPermission(role, "maintenance.manage");
   const canCreateMaintenance = hasPermission(role, "maintenance.create");
+  const canManageRooms = hasPermission(role, "rooms.manage");
   const canRecordMeters =
     hasPermission(role, "room_status.update") || hasPermission(role, "rooms.manage");
 
@@ -124,8 +132,10 @@ export default async function OperationsPage({
           ) : (
             <StaffOperations
               activeAssignments={data.activeAssignments}
+              activeReservations={data.activeReservations}
               canManageCustomers={canManageCustomers}
               canManageMaintenance={canManageMaintenance}
+              canManageRooms={canManageRooms}
               canRecordMeters={canRecordMeters}
               invoices={data.invoices}
               maintenanceRequests={data.maintenanceRequests}
@@ -208,6 +218,7 @@ async function getOperationsData({
 
   const [
     rooms,
+    activeReservations,
     activeAssignments,
     invoices,
     meterReadings,
@@ -241,6 +252,31 @@ async function getOperationsData({
           roomNumber: "asc"
         }
       ]
+    }),
+    prisma.roomReservation.findMany({
+      where: {
+        organizationId,
+        status: "ACTIVE"
+      },
+      include: {
+        room: {
+          include: {
+            floor: {
+              include: {
+                building: {
+                  include: {
+                    asset: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        reservedByUser: true
+      },
+      orderBy: {
+        createdAt: "desc"
+      }
     }),
     prisma.roomAssignment.findMany({
       where: {
@@ -330,6 +366,7 @@ async function getOperationsData({
 
   return {
     activeAssignments,
+    activeReservations,
     invoices,
     maintenanceRequests,
     meterReadings,
@@ -347,8 +384,10 @@ async function getOperationsData({
 
 function StaffOperations({
   activeAssignments,
+  activeReservations,
   canManageCustomers,
   canManageMaintenance,
+  canManageRooms,
   canRecordMeters,
   invoices,
   maintenanceRequests,
@@ -359,8 +398,10 @@ function StaffOperations({
   staffUsers
 }: {
   activeAssignments: Awaited<ReturnType<typeof getOperationsData>>["activeAssignments"];
+  activeReservations: Awaited<ReturnType<typeof getOperationsData>>["activeReservations"];
   canManageCustomers: boolean;
   canManageMaintenance: boolean;
+  canManageRooms: boolean;
   canRecordMeters: boolean;
   invoices: Awaited<ReturnType<typeof getOperationsData>>["invoices"];
   maintenanceRequests: Awaited<ReturnType<typeof getOperationsData>>["maintenanceRequests"];
@@ -370,6 +411,13 @@ function StaffOperations({
   rooms: Awaited<ReturnType<typeof getOperationsData>>["rooms"];
   staffUsers: Awaited<ReturnType<typeof getOperationsData>>["staffUsers"];
 }) {
+  const vacantRooms = rooms.filter((room) => room.status === "VACANT");
+  const occupiableRooms = vacantRooms;
+  const maintenanceRooms = rooms.filter(
+    (room) => room.status === "VACANT" || room.status === "OCCUPIED"
+  );
+  const unavailableRooms = vacantRooms;
+
   return (
     <div className="grid gap-6">
       <section className="grid gap-4 xl:grid-cols-2">
@@ -382,7 +430,7 @@ function StaffOperations({
             <form action={assignRoom} className="grid gap-3">
               <input type="hidden" name="organizationId" value={organizationId} />
               <SelectField label="Room" name="roomId">
-                {rooms.map((room) => (
+                {occupiableRooms.map((room) => (
                   <option key={room.id} value={room.id}>
                     {roomLabel(room)}
                   </option>
@@ -405,6 +453,39 @@ function StaffOperations({
               <Button type="submit" className="justify-self-start">
                 <DoorOpen className="size-4" aria-hidden="true" />
                 Assign room
+              </Button>
+            </form>
+          </Panel>
+        ) : null}
+        {canManageCustomers ? (
+          <Panel
+            icon={<CalendarCheck className="size-5" aria-hidden="true" />}
+            title="Reserve room"
+            description="Hold a vacant room for a prospective resident."
+          >
+            <form action={reserveRoom} className="grid gap-3">
+              <input type="hidden" name="organizationId" value={organizationId} />
+              <SelectField label="Room" name="roomId">
+                {vacantRooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {roomLabel(room)}
+                  </option>
+                ))}
+              </SelectField>
+              <div className="grid gap-3 md:grid-cols-2">
+                <TextField name="reserverName" label="Reserver name" required />
+                <TextField name="reserverPhone" label="Phone" />
+                <TextField name="reservedDate" label="Reserved date" type="date" required />
+                <TextField
+                  name="expectedMoveInDate"
+                  label="Expected move-in"
+                  type="date"
+                />
+              </div>
+              <TextField name="note" label="Note" />
+              <Button type="submit" className="justify-self-start">
+                <CalendarCheck className="size-4" aria-hidden="true" />
+                Reserve room
               </Button>
             </form>
           </Panel>
@@ -479,6 +560,28 @@ function StaffOperations({
             </form>
           </Panel>
         ) : null}
+        {canManageRooms ? (
+          <Panel
+            icon={<CalendarX className="size-5" aria-hidden="true" />}
+            title="Mark unavailable"
+            description="Take a vacant room out of service."
+          >
+            <form action={markRoomUnavailable} className="grid gap-3">
+              <input type="hidden" name="organizationId" value={organizationId} />
+              <SelectField label="Room" name="roomId">
+                {unavailableRooms.map((room) => (
+                  <option key={room.id} value={room.id}>
+                    {roomLabel(room)}
+                  </option>
+                ))}
+              </SelectField>
+              <Button type="submit" variant="outline" className="justify-self-start">
+                <CalendarX className="size-4" aria-hidden="true" />
+                Mark unavailable
+              </Button>
+            </form>
+          </Panel>
+        ) : null}
       </section>
 
       <Panel
@@ -493,8 +596,8 @@ function StaffOperations({
         <form action={createMaintenanceRequest} className="grid gap-3">
           <input type="hidden" name="organizationId" value={organizationId} />
           <div className="grid gap-3 md:grid-cols-2">
-            <SelectField label="Room" name="roomId" optional>
-              {rooms.map((room) => (
+            <SelectField label="Room" name="roomId">
+              {maintenanceRooms.map((room) => (
                 <option key={room.id} value={room.id}>
                   {roomLabel(room)}
                 </option>
@@ -535,6 +638,59 @@ function StaffOperations({
 
       <section className="grid gap-4 xl:grid-cols-2">
         <ListPanel
+          icon={<CalendarCheck className="size-5" aria-hidden="true" />}
+          title="Reservations"
+        >
+          {activeReservations.length ? (
+            activeReservations.map((reservation) => (
+              <article key={reservation.id} className="grid gap-3 border-b py-4 last:border-b-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold">{reservation.reserverName}</h3>
+                  <StatusPill label={reservation.status} />
+                  <StatusPill label={roomLabel(reservation.room)} muted />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {reservation.reserverPhone || "No phone"} - reserved{" "}
+                  {formatDate(reservation.reservedDate)}
+                  {reservation.expectedMoveInDate
+                    ? ` - expected ${formatDate(reservation.expectedMoveInDate)}`
+                    : ""}
+                </p>
+                <form action={assignRoom} className="grid gap-2 md:grid-cols-2">
+                  <input type="hidden" name="organizationId" value={organizationId} />
+                  <input type="hidden" name="reservationId" value={reservation.id} />
+                  <input type="hidden" name="roomId" value={reservation.roomId} />
+                  <TextField name="moveInDate" label="Move-in date" type="date" required />
+                  <TextField
+                    name="idDocumentNumber"
+                    label="ID / passport number"
+                    minLength={6}
+                    maxLength={64}
+                    required
+                  />
+                  <TextField name="emergencyContact" label="Emergency contact" />
+                  <TextField name="contractNumber" label="Contract number" />
+                  <Button type="submit" className="justify-self-start">
+                    <DoorOpen className="size-4" aria-hidden="true" />
+                    Move in
+                  </Button>
+                </form>
+                <form action={cancelReservation}>
+                  <input type="hidden" name="organizationId" value={organizationId} />
+                  <input type="hidden" name="reservationId" value={reservation.id} />
+                  <Button type="submit" variant="outline" size="sm">
+                    <CalendarX className="size-4" aria-hidden="true" />
+                    Cancel reservation
+                  </Button>
+                </form>
+              </article>
+            ))
+          ) : (
+            <EmptyState label="No active reservations" />
+          )}
+        </ListPanel>
+
+        <ListPanel
           icon={<Users className="size-5" aria-hidden="true" />}
           title="Residents and active stays"
         >
@@ -560,6 +716,17 @@ function StaffOperations({
                       ? ` · Login ${assignment.loginUser.username}`
                       : ""}
                 </p>
+                {canManageCustomers && assignment.room.status === "OCCUPIED" ? (
+                  <form action={moveOutRoom} className="grid gap-2 md:grid-cols-[180px_auto]">
+                    <input type="hidden" name="organizationId" value={organizationId} />
+                    <input type="hidden" name="assignmentId" value={assignment.id} />
+                    <TextField name="moveOutDate" label="Move-out date" type="date" required />
+                    <Button type="submit" variant="outline" className="self-end justify-self-start">
+                      <LogOut className="size-4" aria-hidden="true" />
+                      Move out
+                    </Button>
+                  </form>
+                ) : null}
               </article>
             ))
           ) : (

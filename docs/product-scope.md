@@ -27,10 +27,11 @@ The first MVP should include:
 4. `SA` creates Manager and Operation users.
 5. One user can belong to multiple organizations.
 6. Manager creates Operation users.
-7. Move-in creates a room login from asset abbreviation plus room number.
-8. Fixed RBAC in code.
-9. Audit log for important admin actions.
-10. Organization Switcher for organization-scoped work.
+7. Reserve rooms, cancel reservations, and move in from vacant or reserved rooms.
+8. Move-in creates a room login from asset abbreviation plus room number.
+9. Fixed RBAC in code.
+10. Audit log for important admin actions and room status workflow changes.
+11. Organization Switcher for organization-scoped work.
 
 ## Out of Scope for MVP
 
@@ -49,4 +50,5 @@ The first MVP should include:
 - Every protected action must be checked on the server.
 - Every organization-scoped query must include organization scope.
 - UI menu visibility is helpful but never the only authorization layer.
+- Room status changes must come from workflow actions, not direct field edits.
 - Prefer simple fixed rules until real customer feedback proves a need for more.

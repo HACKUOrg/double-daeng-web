@@ -24,13 +24,14 @@ type AppPageProps = {
   }>;
 };
 
-type RoomStatus = "VACANT" | "OCCUPIED" | "MAINTENANCE" | "UNAVAILABLE";
+type RoomStatus = "VACANT" | "OCCUPIED" | "MAINTENANCE" | "UNAVAILABLE" | "RESERVED";
 
 const roomStatusLabels: Record<RoomStatus, string> = {
   VACANT: "Vacant",
   OCCUPIED: "Occupied",
   MAINTENANCE: "Maintenance",
-  UNAVAILABLE: "Unavailable"
+  UNAVAILABLE: "Unavailable",
+  RESERVED: "Reserved"
 };
 
 const roleDashboardCopy: Record<

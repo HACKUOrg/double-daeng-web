@@ -12,6 +12,13 @@ const tables = [
   "floors",
   "organization_memberships",
   "organizations",
+  "room_reservations",
+  "room_assignments",
+  "contracts",
+  "invoices",
+  "meter_readings",
+  "maintenance_requests",
+  "attachments",
   "rooms",
   "users"
 ];

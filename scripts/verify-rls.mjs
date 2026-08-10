@@ -28,6 +28,7 @@ if (!anonUsers.error) {
 }
 
 for (const table of [
+  "room_reservations",
   "room_assignments",
   "contracts",
   "invoices",

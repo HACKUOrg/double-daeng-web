@@ -42,12 +42,6 @@ type OrganizationDetailPageProps = {
 
 const assetTypes = ["DORMITORY", "CONDO", "APARTMENT", "MIXED"] as const;
 const assetStatuses = ["ACTIVE", "SUSPENDED"] as const;
-const roomStatuses = [
-  "VACANT",
-  "OCCUPIED",
-  "MAINTENANCE",
-  "UNAVAILABLE"
-] as const;
 
 export default async function OrganizationDetailPage({
   params,
@@ -467,7 +461,7 @@ export default async function OrganizationDetailPage({
 
                               <form
                                 action={createRoom}
-                                className="mt-3 grid gap-3 md:grid-cols-[1fr_150px_150px_180px_auto]"
+                                className="mt-3 grid gap-3 md:grid-cols-[1fr_150px_150px_auto]"
                               >
                                 <input
                                   type="hidden"
@@ -500,20 +494,6 @@ export default async function OrganizationDetailPage({
                                     defaultValue="0"
                                     required
                                   />
-                                </label>
-                                <label className="grid gap-2 text-sm font-medium">
-                                  Status
-                                  <select
-                                    name="status"
-                                    defaultValue="VACANT"
-                                    className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                  >
-                                    {roomStatuses.map((status) => (
-                                      <option key={status} value={status}>
-                                        {status}
-                                      </option>
-                                    ))}
-                                  </select>
                                 </label>
                                 <Button
                                   type="submit"
@@ -554,6 +534,7 @@ export default async function OrganizationDetailPage({
                                           className="h-9"
                                           required
                                         />
+                                        <StatusPill status={room.status} />
                                       </div>
                                       <div className="grid grid-cols-2 gap-2">
                                         <Input
@@ -571,18 +552,7 @@ export default async function OrganizationDetailPage({
                                           required
                                         />
                                       </div>
-                                      <div className="grid grid-cols-[1fr_auto_auto] gap-2">
-                                        <select
-                                          name="status"
-                                          defaultValue={room.status}
-                                          className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                        >
-                                          {roomStatuses.map((status) => (
-                                            <option key={status} value={status}>
-                                              {status}
-                                            </option>
-                                          ))}
-                                        </select>
+                                      <div className="grid grid-cols-[auto_auto] gap-2">
                                         <Button type="submit" variant="outline" size="sm">
                                           <RefreshCw
                                             className="size-4"

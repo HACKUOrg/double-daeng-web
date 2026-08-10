@@ -41,12 +41,19 @@ enum RoomStatus {
   OCCUPIED
   MAINTENANCE
   UNAVAILABLE
+  RESERVED
 }
 
 enum RoomAssignmentStatus {
   ACTIVE
   MOVED_OUT
   CANCELLED
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CANCELLED
+  CONVERTED
 }
 
 enum ContractStatus {
@@ -99,6 +106,7 @@ model User {
   roomLoginAssignments        RoomAssignment[]        @relation("RoomLoginUser")
   createdMaintenanceRequests  MaintenanceRequest[]     @relation("MaintenanceCreatedBy")
   assignedMaintenanceRequests MaintenanceRequest[]     @relation("MaintenanceAssignedTo")
+  roomReservations            RoomReservation[]        @relation("ReservationActor")
   uploadedAttachments         Attachment[]             @relation("AttachmentUploader")
 
   @@index([role])
@@ -121,6 +129,7 @@ model Organization {
   invoices            Invoice[]
   meterReadings       MeterReading[]
   maintenanceRequests MaintenanceRequest[]
+  roomReservations    RoomReservation[]
   attachments         Attachment[]
 
   @@index([status])
@@ -202,6 +211,7 @@ model Room {
 
   floor               Floor                @relation(fields: [floorId], references: [id], onDelete: Cascade)
   assignments         RoomAssignment[]
+  reservations        RoomReservation[]
   meterReadings       MeterReading[]
   maintenanceRequests MaintenanceRequest[]
 
@@ -238,6 +248,30 @@ model RoomAssignment {
   @@index([loginUserId, status])
   @@unique([organizationId, residentCode])
   @@map("room_assignments")
+}
+
+model RoomReservation {
+  id                 String            @id @default(uuid()) @db.Uuid
+  organizationId     String            @map("organization_id") @db.Uuid
+  roomId             String            @map("room_id") @db.Uuid
+  reservedByUserId   String?           @map("reserved_by_user_id") @db.Uuid
+  reserverName       String            @map("reserver_name")
+  reserverPhone      String?           @map("reserver_phone")
+  reservedDate       DateTime          @default(now()) @map("reserved_date") @db.Date
+  expectedMoveInDate DateTime?         @map("expected_move_in_date") @db.Date
+  note               String?
+  status             ReservationStatus @default(ACTIVE)
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  room           Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  reservedByUser User?        @relation("ReservationActor", fields: [reservedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([roomId, status])
+  @@index([reservedByUserId])
+  @@map("room_reservations")
 }
 
 model Contract {
@@ -313,6 +347,7 @@ model MaintenanceRequest {
   description       String
   priority          MaintenancePriority @default(MEDIUM)
   status            MaintenanceStatus   @default(OPEN)
+  previousRoomStatus RoomStatus?        @map("previous_room_status")
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 

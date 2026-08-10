@@ -20,6 +20,7 @@ users
   -> buildings
   -> floors
   -> rooms
+  -> room_reservations
   -> room_assignments
   -> contracts
   -> invoices
@@ -92,10 +93,15 @@ Each asset stores an `abbreviation` used to generate resident room usernames.
 - `OCCUPIED`
 - `MAINTENANCE`
 - `UNAVAILABLE`
+- `RESERVED`
 
 Rooms store the default `rent_amount` and `deposit_amount`. Contract creation
 copies these room amounts as the stay snapshot instead of asking staff to type
 them again during move-in.
+
+Room status is action-driven. Staff do not edit the status directly; workflows
+such as reserve, cancel reservation, move-in, move-out, maintenance, and
+unavailable transitions update it.
 
 ## Operations
 
@@ -103,6 +109,7 @@ Phase 8 adds the first operational records:
 
 | Table | Purpose |
 | --- | --- |
+| `room_reservations` | Lightweight active/cancelled/converted room reservation records with reserver name, phone, dates, and note. |
 | `room_assignments` | Move-in/stay record between a resident and a room. Stores the system-generated room code, name, phone, emergency contact, ID/passport number, and the linked `RESIDENT` room login user. |
 | `contracts` | Contract record for one room assignment. File upload is still pending. |
 | `invoices` | Monthly or ad hoc invoice records with invoice status. |
@@ -120,8 +127,9 @@ through server actions and Prisma.
 organization, asset, building, floor, and room mutations. Phase 3 writes
 membership assignment/removal events. Phase 4 writes direct user-management
 events. Phase 6 adds an `SA` audit-log page for viewing recent rows, filters,
-and before/after snapshots. Phase 8 writes audit rows for room assignments,
-room occupancy changes, invoices, meter readings, and maintenance requests.
+and before/after snapshots. Phase 8 writes audit rows for room reservations,
+room assignments, room status workflow changes, invoices, meter readings, and
+maintenance requests.
 
 | Field | Purpose |
 | --- | --- |
