@@ -1,5 +1,3 @@
-import { LayoutDashboard, Users, Wrench } from "lucide-react";
-import { OrganizationSwitcher } from "@/app/app/_components/organization-switcher";
 import { SidebarNav, type SidebarNavItem } from "@/components/sidebar-nav";
 import { resolveActiveOrganization } from "@/lib/auth/organization-scope";
 import { requirePermission } from "@/lib/auth/session";
@@ -12,8 +10,7 @@ export default async function AppLayout({
 }>) {
   const profile = await requirePermission("app.access");
   const role = profile.role as Role;
-  const { activeMemberships, activeOrganization } =
-    resolveActiveOrganization(profile);
+  const { activeOrganization } = resolveActiveOrganization(profile);
   const dashboardHref = activeOrganization
     ? `/app?organizationId=${activeOrganization.id}`
     : "/app";
@@ -26,24 +23,23 @@ export default async function AppLayout({
   const navItems: SidebarNavItem[] = [
     {
       href: dashboardHref,
-      icon: LayoutDashboard,
+      icon: "dashboard",
       label: "Dashboard"
     },
     {
       href: operationsHref,
-      icon: Wrench,
+      icon: "wrench",
       label: "Operations"
-    },
-    ...(hasPermission(role, "users.manage.organization")
-      ? [
-          {
-            href: usersHref,
-            icon: Users,
-            label: "Users"
-          }
-        ]
-      : [])
+    }
   ];
+
+  if (hasPermission(role, "users.manage.organization")) {
+    navItems.push({
+      href: usersHref,
+      icon: "users",
+      label: "Users"
+    });
+  }
 
   return (
     <div className="min-h-screen">
@@ -54,34 +50,7 @@ export default async function AppLayout({
         userLabel={profile.displayName}
         userMeta={roleLabels[role]}
       />
-      <div className="min-h-screen pl-[4.75rem]">
-        <header className="border-b bg-background/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl flex-col gap-3 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm font-medium text-primary">Workspace</p>
-              <p className="text-sm text-muted-foreground">
-                {activeOrganization
-                  ? activeOrganization.name
-                  : "No active organization"}
-              </p>
-            </div>
-            {activeOrganization ? (
-              <OrganizationSwitcher
-                activeOrganizationId={activeOrganization.id}
-                action="/app"
-                memberships={activeMemberships}
-                size="compact"
-              />
-            ) : null}
-          </div>
-          {!activeOrganization ? (
-            <div className="mx-auto max-w-6xl px-6 pb-4">
-              <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-                No active organization is assigned to this account.
-              </p>
-            </div>
-          ) : null}
-        </header>
+      <div className="min-h-screen lg:pl-[4.75rem]">
         <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
       </div>
     </div>

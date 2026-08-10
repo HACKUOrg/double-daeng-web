@@ -1,4 +1,3 @@
-import { Building2, ClipboardList, ShieldCheck, Users } from "lucide-react";
 import { SidebarNav, type SidebarNavItem } from "@/components/sidebar-nav";
 import { requirePermission } from "@/lib/auth/session";
 import { hasPermission } from "@/lib/rbac";
@@ -11,52 +10,52 @@ export default async function AdminLayout({
   const profile = await requirePermission("admin.access");
   const role = profile.role;
   const navItems: SidebarNavItem[] = [
-    ...(hasPermission(role, "organizations.manage")
-      ? [
-          {
-            href: "/admin/organizations",
-            icon: Building2,
-            label: "Organizations"
-          }
-        ]
-      : []),
-    ...(hasPermission(role, "memberships.manage")
-      ? [
-          {
-            href: "/admin/memberships",
-            icon: Users,
-            label: "Memberships"
-          }
-        ]
-      : []),
-    ...(hasPermission(role, "users.manage.all")
-      ? [
-          {
-            href: "/admin/users",
-            icon: Users,
-            label: "Users"
-          }
-        ]
-      : []),
-    ...(hasPermission(role, "iam.view")
-      ? [
-          {
-            href: "/admin/iam",
-            icon: ShieldCheck,
-            label: "IAM"
-          }
-        ]
-      : []),
-    ...(hasPermission(role, "audit.view")
-      ? [
-          {
-            href: "/admin/audit",
-            icon: ClipboardList,
-            label: "Audit"
-          }
-        ]
-      : [])
+    {
+      href: "/admin",
+      icon: "dashboard",
+      label: "Dashboard"
+    }
   ];
+
+  if (hasPermission(role, "organizations.manage")) {
+    navItems.push({
+      href: "/admin/organizations",
+      icon: "organizations",
+      label: "Organizations"
+    });
+  }
+
+  if (hasPermission(role, "memberships.manage")) {
+    navItems.push({
+      href: "/admin/memberships",
+      icon: "users",
+      label: "Memberships"
+    });
+  }
+
+  if (hasPermission(role, "users.manage.all")) {
+    navItems.push({
+      href: "/admin/users",
+      icon: "users",
+      label: "Users"
+    });
+  }
+
+  if (hasPermission(role, "iam.view")) {
+    navItems.push({
+      href: "/admin/iam",
+      icon: "iam",
+      label: "IAM"
+    });
+  }
+
+  if (hasPermission(role, "audit.view")) {
+    navItems.push({
+      href: "/admin/audit",
+      icon: "audit",
+      label: "Audit"
+    });
+  }
 
   return (
     <div className="min-h-screen">
@@ -68,15 +67,7 @@ export default async function AdminLayout({
         userLabel={profile.displayName}
         userMeta="System admin"
       />
-      <div className="min-h-screen pl-[4.75rem]">
-        <header className="border-b bg-background/80 backdrop-blur">
-          <div className="mx-auto max-w-6xl px-6 py-4">
-            <p className="text-sm font-medium text-primary">System Admin</p>
-            <p className="text-sm text-muted-foreground">
-              Manage organizations, memberships, access, and audit activity.
-            </p>
-          </div>
-        </header>
+      <div className="min-h-screen lg:pl-[4.75rem]">
         <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
       </div>
     </div>
