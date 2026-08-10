@@ -18,7 +18,7 @@ type UsersPageProps = {
   }>;
 };
 
-const creatableRoles = ["MANAGER", "OPERATION", "CUSTOMER"] as const;
+const creatableRoles = ["MANAGER", "OPERATION"] as const;
 const statuses = ["ACTIVE", "SUSPENDED"] as const;
 
 export default async function UsersPage({ searchParams }: UsersPageProps) {
@@ -50,7 +50,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       }
     })
   ]);
-  const managedUsers = users.filter((user) => user.role !== "SA");
+  const managedUsers = users.filter(
+    (user) => user.role !== "SA" && user.role !== "RESIDENT"
+  );
 
   return (
     <div className="grid gap-6">
@@ -258,7 +260,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             <Users className="mx-auto size-8 text-muted-foreground" />
             <p className="mt-3 font-medium">No managed users yet</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Create the first Manager, Operation, or Customer user above.
+              Create the first Manager or Operation user above.
             </p>
           </div>
         )}

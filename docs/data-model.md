@@ -20,7 +20,6 @@ users
   -> buildings
   -> floors
   -> rooms
-  -> customer_profiles
   -> room_assignments
   -> contracts
   -> invoices
@@ -42,8 +41,9 @@ audit_logs
 | `id` | App user id. |
 | `auth_user_id` | Supabase Auth user id. |
 | `email` | Unique login email. |
+| `username` | Optional unique room username for resident logins, such as `PT101`. |
 | `display_name` | Name shown in the app. |
-| `role` | One of `SA`, `MANAGER`, `OPERATION`, `CUSTOMER`. |
+| `role` | One of `SA`, `MANAGER`, `OPERATION`, `RESIDENT`. |
 | `status` | `ACTIVE` or `SUSPENDED`. |
 
 ## Organizations
@@ -84,6 +84,7 @@ Organization
 ```
 
 `assets` represent dormitories, condos, apartments, or mixed property groups.
+Each asset stores an `abbreviation` used to generate resident room usernames.
 
 `rooms` start with these statuses:
 
@@ -92,18 +93,21 @@ Organization
 - `MAINTENANCE`
 - `UNAVAILABLE`
 
+Rooms store the default `rent_amount` and `deposit_amount`. Contract creation
+copies these room amounts as the stay snapshot instead of asking staff to type
+them again during move-in.
+
 ## Operations
 
 Phase 8 adds the first operational records:
 
 | Table | Purpose |
 | --- | --- |
-| `customer_profiles` | Tenant/resident profile scoped to one organization. Can link to a `CUSTOMER` app user. |
-| `room_assignments` | Active or historical stay between a customer profile and a room. |
+| `room_assignments` | Move-in/stay record between a resident and a room. Stores the system-generated room code, name, phone, emergency contact, ID/passport number, and the linked `RESIDENT` room login user. |
 | `contracts` | Contract record for one room assignment. File upload is still pending. |
 | `invoices` | Monthly or ad hoc invoice records with invoice status. |
 | `meter_readings` | Water/electric room readings by date. |
-| `maintenance_requests` | Maintenance tickets created by staff or customers. |
+| `maintenance_requests` | Maintenance tickets created by staff or residents. |
 | `attachments` | Attachment metadata for future private Supabase Storage files. |
 
 All Phase 8 tables include `organization_id` and must be queried through the
@@ -116,9 +120,8 @@ through server actions and Prisma.
 organization, asset, building, floor, and room mutations. Phase 3 writes
 membership assignment/removal events. Phase 4 writes direct user-management
 events. Phase 6 adds an `SA` audit-log page for viewing recent rows, filters,
-and before/after snapshots. Phase 8 writes audit rows for customer profiles,
-room assignments, room occupancy changes, invoices, meter readings, and
-maintenance requests.
+and before/after snapshots. Phase 8 writes audit rows for room assignments,
+room occupancy changes, invoices, meter readings, and maintenance requests.
 
 | Field | Purpose |
 | --- | --- |

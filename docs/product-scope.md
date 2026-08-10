@@ -15,7 +15,7 @@ management.
 - `SA`: system administrators who manage the platform.
 - `MANAGER`: organization-level managers.
 - `OPERATION`: staff who handle daily room, customer, and maintenance work.
-- `CUSTOMER`: residents or tenants who access their own information.
+- `RESIDENT`: room-based resident login for tenants with an active stay.
 
 ## MVP Scope
 
@@ -24,10 +24,10 @@ The first MVP should include:
 1. `SA` login.
 2. `SA` creates organizations.
 3. `SA` creates assets, buildings, floors, and rooms.
-4. `SA` creates Manager, Operation, and Customer users.
+4. `SA` creates Manager and Operation users.
 5. One user can belong to multiple organizations.
-6. Manager creates Operation and Customer users.
-7. Operation creates Customer users.
+6. Manager creates Operation users.
+7. Move-in creates a room login from asset abbreviation plus room number.
 8. Fixed RBAC in code.
 9. Audit log for important admin actions.
 10. Organization Switcher for organization-scoped work.

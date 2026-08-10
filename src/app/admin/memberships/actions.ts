@@ -96,7 +96,7 @@ export async function assignOrganizationMembership(formData: FormData) {
 
   if (
     !user ||
-    user.role === "SA" ||
+    !["MANAGER", "OPERATION"].includes(user.role) ||
     user.status !== "ACTIVE" ||
     !organization ||
     organization.status !== "ACTIVE"
@@ -176,7 +176,7 @@ export async function removeOrganizationMembership(formData: FormData) {
     }
   });
 
-  if (!before || before.user.role === "SA") {
+  if (!before || !["MANAGER", "OPERATION"].includes(before.user.role)) {
     invalidMembership();
   }
 

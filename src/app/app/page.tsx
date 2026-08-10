@@ -50,14 +50,14 @@ const roleDashboardCopy: Record<
   OPERATION: {
     title: "Operation dashboard",
     description:
-      "Keep the active organization visible and prepare the workspace for room, customer, and maintenance workflows.",
-    focus: ["Daily work queue", "Room status", "Customer support"]
+      "Keep the active organization visible and prepare the workspace for room, resident, and maintenance workflows.",
+    focus: ["Daily work queue", "Room status", "Resident support"]
   },
-  CUSTOMER: {
-    title: "Customer dashboard",
+  RESIDENT: {
+    title: "Resident dashboard",
     description:
-      "Confirm the active organization context and prepare resident-facing access for requests and personal data.",
-    focus: ["My organization", "My requests", "My information"]
+      "Access room-scoped resident records and maintenance requests for the active stay.",
+    focus: ["My room", "My requests", "My information"]
   }
 };
 
@@ -218,7 +218,7 @@ async function getOrganizationDashboard(
         by: ["role"],
         where: {
           role: {
-            in: ["MANAGER", "OPERATION", "CUSTOMER"]
+            in: ["MANAGER", "OPERATION", "RESIDENT"]
           },
           memberships: {
             some: {
@@ -244,7 +244,7 @@ async function getOrganizationDashboard(
       ])
     ) as Record<RoomStatus, number>,
     usersByRole: Object.fromEntries(
-      (["MANAGER", "OPERATION", "CUSTOMER"] as const).map((userRole) => [
+      (["MANAGER", "OPERATION", "RESIDENT"] as const).map((userRole) => [
         userRole,
         usersByRole.find((row) => row.role === userRole)?._count._all ?? 0
       ])
@@ -281,26 +281,30 @@ function RoleWorkspace({
   organizationName: string;
   role: Exclude<Role, "SA">;
 }) {
-  if (role === "CUSTOMER") {
+  if (role === "RESIDENT") {
     return (
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <WorkspacePanel
           icon={<ShieldCheck className="size-5" aria-hidden="true" />}
-          title="My organization"
+          title="My room access"
           description={`${organizationName} is the active workspace for this account.`}
         >
           <p className="text-sm text-muted-foreground">
-            Resident profile, contracts, invoices, and requests are planned for
-            the next operational phase.
+            Resident profile, contracts, invoices, and requests are scoped to
+            the active room assignment.
           </p>
         </WorkspacePanel>
         <WorkspacePanel
           icon={<LifeBuoy className="size-5" aria-hidden="true" />}
-          title="Customer services"
-          description="Maintenance requests and own-data views are prepared in RBAC."
+          title="Resident services"
+          description="Maintenance requests and own-data views are limited to this stay."
         >
           <ReadinessList
-            items={["Organization context verified", "Request access reserved", "Own data permission ready"]}
+            items={[
+              "Active room assignment required",
+              "Maintenance request ready",
+              "Own data permission ready"
+            ]}
           />
         </WorkspacePanel>
       </section>
@@ -329,7 +333,7 @@ function RoleWorkspace({
         description="The app shell is ready for core dorm and condo operations."
       >
         <ReadinessList
-          items={["Customer profiles", "Room assignment", "Move-in / move-out"]}
+          items={["Move-in records", "Room assignment", "Move-in / move-out"]}
         />
       </WorkspacePanel>
       <WorkspacePanel
@@ -338,7 +342,7 @@ function RoleWorkspace({
         description={
           role === "MANAGER"
             ? "Managers can prepare teams and property data."
-            : "Operations can prepare customer support flows."
+            : "Operations can prepare resident support flows."
         }
       >
         <Button asChild variant="outline">

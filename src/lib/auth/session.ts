@@ -45,6 +45,28 @@ export async function requireProfile() {
     redirect("/login");
   }
 
+  if (profile.role === "RESIDENT") {
+    const prisma = getPrisma();
+    const activeAssignment = await prisma.roomAssignment.findFirst({
+      where: {
+        loginUserId: profile.id,
+        status: "ACTIVE",
+        room: {
+          status: "OCCUPIED"
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!activeAssignment) {
+      const supabase = await createClient();
+      await supabase.auth.signOut();
+      redirect("/login?error=no-active-room");
+    }
+  }
+
   return profile;
 }
 

@@ -1,4 +1,4 @@
-export const roles = ["SA", "MANAGER", "OPERATION", "CUSTOMER"] as const;
+export const roles = ["SA", "MANAGER", "OPERATION", "RESIDENT"] as const;
 
 export type Role = (typeof roles)[number];
 
@@ -26,7 +26,7 @@ export const roleLabels: Record<Role, string> = {
   SA: "System Admin",
   MANAGER: "Manager",
   OPERATION: "Operation",
-  CUSTOMER: "Customer"
+  RESIDENT: "Resident"
 };
 
 export const permissionLabels: Record<Permission, string> = {
@@ -67,19 +67,18 @@ export const permissionsByRole: Record<Role, Permission[]> = {
   ],
   OPERATION: [
     "app.access",
-    "users.manage.organization",
     "customers.manage",
     "room_status.update",
     "maintenance.manage"
   ],
-  CUSTOMER: ["app.access", "own_data.view", "maintenance.create"]
+  RESIDENT: ["app.access", "own_data.view", "maintenance.create"]
 };
 
 export const creatableRolesByRole: Record<Role, Role[]> = {
-  SA: ["MANAGER", "OPERATION", "CUSTOMER"],
-  MANAGER: ["OPERATION", "CUSTOMER"],
-  OPERATION: ["CUSTOMER"],
-  CUSTOMER: []
+  SA: ["MANAGER", "OPERATION"],
+  MANAGER: ["OPERATION"],
+  OPERATION: [],
+  RESIDENT: []
 };
 
 export function canCreateRole(actorRole: Role, targetRole: Role) {

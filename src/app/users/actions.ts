@@ -13,7 +13,7 @@ const uuidSchema = z.string().uuid();
 const emailSchema = z.string().trim().email().max(254);
 const displayNameSchema = z.string().trim().min(1).max(120);
 const passwordSchema = z.string().min(8).max(128);
-const managedRoleSchema = z.enum(["MANAGER", "OPERATION", "CUSTOMER"]);
+const managedRoleSchema = z.enum(["MANAGER", "OPERATION"]);
 const userStatusSchema = z.enum(["ACTIVE", "SUSPENDED"]);
 const suspendedAuthDuration = "876000h";
 

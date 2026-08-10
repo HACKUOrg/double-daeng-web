@@ -5,14 +5,12 @@ import {
   FileText,
   Gauge,
   LifeBuoy,
-  UserPlus,
   Users,
   Wrench
 } from "lucide-react";
 import { OrganizationSwitcher } from "@/app/app/_components/organization-switcher";
 import {
   assignRoom,
-  createCustomerProfile,
   createInvoice,
   createMaintenanceRequest,
   recordMeterReading,
@@ -72,9 +70,8 @@ export default async function OperationsPage({
             Core operations
           </h1>
           <p className="mt-3 max-w-2xl text-muted-foreground">
-            Manage customer profiles, room assignments, contracts, invoices,
-            meter readings, and maintenance requests inside the active
-            organization.
+            Manage move-ins, room assignments, contracts, invoices, meter
+            readings, and maintenance requests inside the active organization.
           </p>
         </div>
         {activeOrganization ? (
@@ -95,8 +92,8 @@ export default async function OperationsPage({
           <section className="grid gap-3 md:grid-cols-4">
             <Metric
               icon={<Users className="size-5" aria-hidden="true" />}
-              label="Customers"
-              value={data.customers.length}
+              label="Residents"
+              value={data.activeAssignments.length}
             />
             <Metric
               icon={<DoorOpen className="size-5" aria-hidden="true" />}
@@ -115,9 +112,9 @@ export default async function OperationsPage({
             />
           </section>
 
-          {role === "CUSTOMER" ? (
-            <CustomerOperations
-              customerProfile={data.ownCustomerProfile}
+          {role === "RESIDENT" ? (
+            <ResidentOperations
+              activeAssignment={data.ownAssignment}
               invoices={data.invoices}
               maintenanceRequests={data.maintenanceRequests}
               organizationId={activeOrganization.id}
@@ -130,8 +127,6 @@ export default async function OperationsPage({
               canManageCustomers={canManageCustomers}
               canManageMaintenance={canManageMaintenance}
               canRecordMeters={canRecordMeters}
-              customerUsers={data.customerUsers}
-              customers={data.customers}
               invoices={data.invoices}
               maintenanceRequests={data.maintenanceRequests}
               meterReadings={data.meterReadings}
@@ -167,41 +162,51 @@ async function getOperationsData({
   role: Exclude<Role, "SA">;
   prisma: ReturnType<typeof getPrisma>;
 }) {
-  const customerWhere =
-    role === "CUSTOMER"
-      ? {
-          organizationId,
-          userId: profileId
-        }
-      : {
-          organizationId
-        };
   const maintenanceWhere =
-    role === "CUSTOMER"
+    role === "RESIDENT"
       ? {
           organizationId,
-          customerProfile: {
-            userId: profileId
+          roomAssignment: {
+            loginUserId: profileId,
+            status: "ACTIVE" as const
           }
         }
       : {
           organizationId
         };
   const invoiceWhere =
-    role === "CUSTOMER"
+    role === "RESIDENT"
       ? {
           organizationId,
-          customerProfile: {
-            userId: profileId
+          roomAssignment: {
+            loginUserId: profileId,
+            status: "ACTIVE" as const
           }
         }
       : {
           organizationId
         };
+  const roomWhere =
+    role === "RESIDENT"
+      ? {
+          assignments: {
+            some: {
+              loginUserId: profileId,
+              status: "ACTIVE" as const
+            }
+          }
+        }
+      : {
+          floor: {
+            building: {
+              asset: {
+                organizationId
+              }
+            }
+          }
+        };
 
   const [
-    customers,
-    customerUsers,
     rooms,
     activeAssignments,
     invoices,
@@ -209,61 +214,8 @@ async function getOperationsData({
     maintenanceRequests,
     staffUsers
   ] = await Promise.all([
-    prisma.customerProfile.findMany({
-      where: customerWhere,
-      include: {
-        user: true,
-        assignments: {
-          where: {
-            status: "ACTIVE"
-          },
-          include: {
-            room: {
-              include: {
-                floor: {
-                  include: {
-                    building: {
-                      include: {
-                        asset: true
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            contract: true
-          },
-          orderBy: {
-            createdAt: "desc"
-          }
-        }
-      },
-      orderBy: [{ status: "asc" }, { fullName: "asc" }]
-    }),
-    prisma.user.findMany({
-      where: {
-        role: "CUSTOMER",
-        status: "ACTIVE",
-        memberships: {
-          some: {
-            organizationId
-          }
-        }
-      },
-      orderBy: {
-        email: "asc"
-      }
-    }),
     prisma.room.findMany({
-      where: {
-        floor: {
-          building: {
-            asset: {
-              organizationId
-            }
-          }
-        }
-      },
+      where: roomWhere,
       include: {
         floor: {
           include: {
@@ -293,11 +245,16 @@ async function getOperationsData({
     prisma.roomAssignment.findMany({
       where: {
         organizationId,
-        status: "ACTIVE"
+        status: "ACTIVE",
+        ...(role === "RESIDENT"
+          ? {
+              loginUserId: profileId
+            }
+          : {})
       },
       include: {
-        customerProfile: true,
         contract: true,
+        loginUser: true,
         room: {
           include: {
             floor: {
@@ -319,7 +276,6 @@ async function getOperationsData({
     prisma.invoice.findMany({
       where: invoiceWhere,
       include: {
-        customerProfile: true,
         roomAssignment: {
           include: {
             room: true
@@ -346,7 +302,7 @@ async function getOperationsData({
     prisma.maintenanceRequest.findMany({
       where: maintenanceWhere,
       include: {
-        customerProfile: true,
+        roomAssignment: true,
         room: true,
         createdBy: true,
         assignedTo: true
@@ -374,12 +330,10 @@ async function getOperationsData({
 
   return {
     activeAssignments,
-    customerUsers,
-    customers,
     invoices,
     maintenanceRequests,
     meterReadings,
-    ownCustomerProfile: customers[0] ?? null,
+    ownAssignment: activeAssignments[0] ?? null,
     openInvoices: invoices.filter((invoice) =>
       ["DRAFT", "ISSUED", "OVERDUE"].includes(invoice.status)
     ).length,
@@ -396,8 +350,6 @@ function StaffOperations({
   canManageCustomers,
   canManageMaintenance,
   canRecordMeters,
-  customerUsers,
-  customers,
   invoices,
   maintenanceRequests,
   meterReadings,
@@ -410,8 +362,6 @@ function StaffOperations({
   canManageCustomers: boolean;
   canManageMaintenance: boolean;
   canRecordMeters: boolean;
-  customerUsers: Awaited<ReturnType<typeof getOperationsData>>["customerUsers"];
-  customers: Awaited<ReturnType<typeof getOperationsData>>["customers"];
   invoices: Awaited<ReturnType<typeof getOperationsData>>["invoices"];
   maintenanceRequests: Awaited<ReturnType<typeof getOperationsData>>["maintenanceRequests"];
   meterReadings: Awaited<ReturnType<typeof getOperationsData>>["meterReadings"];
@@ -425,56 +375,12 @@ function StaffOperations({
       <section className="grid gap-4 xl:grid-cols-2">
         {canManageCustomers ? (
           <Panel
-            icon={<UserPlus className="size-5" aria-hidden="true" />}
-            title="Customer profile"
-            description="Create a resident profile and optionally link it to an app user."
-          >
-            <form action={createCustomerProfile} className="grid gap-3">
-              <input type="hidden" name="organizationId" value={organizationId} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <TextField name="customerCode" label="Customer code" required />
-                <TextField name="fullName" label="Full name" required />
-                <TextField name="phone" label="Phone" />
-                <TextField name="emergencyContact" label="Emergency contact" />
-              </div>
-              <label className="grid gap-2 text-sm font-medium">
-                Linked app user
-                <select
-                  name="userId"
-                  className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  defaultValue=""
-                >
-                  <option value="">No linked user</option>
-                  {customerUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button type="submit" className="justify-self-start">
-                <UserPlus className="size-4" aria-hidden="true" />
-                Create profile
-              </Button>
-            </form>
-          </Panel>
-        ) : null}
-
-        {canManageCustomers ? (
-          <Panel
             icon={<DoorOpen className="size-5" aria-hidden="true" />}
-            title="Move-in / room assignment"
-            description="Assign one active customer to one room and create a contract record."
+            title="Move-in"
+            description="Create the resident stay, room login, and optional contract in one step."
           >
             <form action={assignRoom} className="grid gap-3">
               <input type="hidden" name="organizationId" value={organizationId} />
-              <SelectField label="Customer" name="customerProfileId">
-                {customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.fullName} - {customer.customerCode}
-                  </option>
-                ))}
-              </SelectField>
               <SelectField label="Room" name="roomId">
                 {rooms.map((room) => (
                   <option key={room.id} value={room.id}>
@@ -483,10 +389,18 @@ function StaffOperations({
                 ))}
               </SelectField>
               <div className="grid gap-3 md:grid-cols-2">
+                <TextField name="residentFullName" label="Resident full name" required />
+                <TextField name="residentPhone" label="Phone" />
+                <TextField name="emergencyContact" label="Emergency contact" />
                 <TextField name="moveInDate" label="Move-in date" type="date" required />
+                <TextField
+                  name="idDocumentNumber"
+                  label="ID / passport number"
+                  minLength={6}
+                  maxLength={64}
+                  required
+                />
                 <TextField name="contractNumber" label="Contract number" />
-                <TextField name="rentAmount" label="Rent amount" inputMode="decimal" />
-                <TextField name="depositAmount" label="Deposit amount" inputMode="decimal" />
               </div>
               <Button type="submit" className="justify-self-start">
                 <DoorOpen className="size-4" aria-hidden="true" />
@@ -502,21 +416,14 @@ function StaffOperations({
           <Panel
             icon={<Banknote className="size-5" aria-hidden="true" />}
             title="Monthly invoice"
-            description="Create an invoice for a customer or current stay."
+            description="Create an invoice for a current stay."
           >
             <form action={createInvoice} className="grid gap-3">
               <input type="hidden" name="organizationId" value={organizationId} />
-              <SelectField label="Customer" name="customerProfileId">
-                {customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.fullName} - {customer.customerCode}
-                  </option>
-                ))}
-              </SelectField>
-              <SelectField label="Stay" name="roomAssignmentId" optional>
+              <SelectField label="Stay" name="roomAssignmentId">
                 {activeAssignments.map((assignment) => (
                   <option key={assignment.id} value={assignment.id}>
-                    {assignment.customerProfile.fullName} - {roomLabel(assignment.room)}
+                    {assignment.residentFullName} - {roomLabel(assignment.room)}
                   </option>
                 ))}
               </SelectField>
@@ -593,10 +500,10 @@ function StaffOperations({
                 </option>
               ))}
             </SelectField>
-            <SelectField label="Customer" name="customerProfileId" optional>
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.fullName} - {customer.customerCode}
+            <SelectField label="Stay" name="roomAssignmentId" optional>
+              {activeAssignments.map((assignment) => (
+                <option key={assignment.id} value={assignment.id}>
+                  {assignment.residentFullName} - {roomLabel(assignment.room)}
                 </option>
               ))}
             </SelectField>
@@ -629,32 +536,34 @@ function StaffOperations({
       <section className="grid gap-4 xl:grid-cols-2">
         <ListPanel
           icon={<Users className="size-5" aria-hidden="true" />}
-          title="Customers and active stays"
+          title="Residents and active stays"
         >
-          {customers.length ? (
-            customers.map((customer) => (
-              <article key={customer.id} className="grid gap-2 border-b py-4 last:border-b-0">
+          {activeAssignments.length ? (
+            activeAssignments.map((assignment) => (
+              <article key={assignment.id} className="grid gap-2 border-b py-4 last:border-b-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold">{customer.fullName}</h3>
-                  <StatusPill label={customer.customerCode} />
-                  <StatusPill label={customer.status} muted />
+                  <h3 className="font-semibold">{assignment.residentFullName}</h3>
+                  <StatusPill label={assignment.residentCode} />
+                  <StatusPill label={assignment.status} muted />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {customer.phone || "No phone"} · {customer.user?.email || "No linked app user"}
+                  {assignment.residentPhone || "No phone"} -{" "}
+                  {assignment.loginUser?.username || "No active room login"}
                 </p>
-                {customer.assignments.map((assignment) => (
-                  <p key={assignment.id} className="text-sm text-muted-foreground">
+                <p className="text-sm text-muted-foreground">
                     Active stay: {roomLabel(assignment.room)} since{" "}
                     {formatDate(assignment.moveInDate)}
                     {assignment.contract
                       ? ` · Contract ${assignment.contract.contractNumber}`
                       : ""}
-                  </p>
-                ))}
+                    {assignment.loginUser?.username
+                      ? ` · Login ${assignment.loginUser.username}`
+                      : ""}
+                </p>
               </article>
             ))
           ) : (
-            <EmptyState label="No customer profiles yet" />
+            <EmptyState label="No active stays yet" />
           )}
         </ListPanel>
 
@@ -670,7 +579,7 @@ function StaffOperations({
                   <StatusPill label={invoice.status} />
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {invoice.customerProfile.fullName} · {formatMoney(invoice.totalAmount)} · due{" "}
+                  {invoice.roomAssignment?.residentFullName || "No stay"} · {formatMoney(invoice.totalAmount)} · due{" "}
                   {formatDate(invoice.dueDate)}
                 </p>
               </article>
@@ -717,7 +626,7 @@ function StaffOperations({
                 </div>
                 <p className="text-sm text-muted-foreground">
                   {request.room?.roomNumber || "No room"} ·{" "}
-                  {request.customerProfile?.fullName || "No customer"} ·{" "}
+                  {request.roomAssignment?.residentFullName || "No stay"} ·{" "}
                   {request.assignedTo?.email || "Unassigned"}
                 </p>
                 {canManageMaintenance ? (
@@ -759,16 +668,16 @@ function StaffOperations({
   );
 }
 
-function CustomerOperations({
+function ResidentOperations({
+  activeAssignment,
   canCreateMaintenance,
-  customerProfile,
   invoices,
   maintenanceRequests,
   organizationId,
   rooms
 }: {
+  activeAssignment: Awaited<ReturnType<typeof getOperationsData>>["ownAssignment"];
   canCreateMaintenance: boolean;
-  customerProfile: Awaited<ReturnType<typeof getOperationsData>>["ownCustomerProfile"];
   invoices: Awaited<ReturnType<typeof getOperationsData>>["invoices"];
   maintenanceRequests: Awaited<ReturnType<typeof getOperationsData>>["maintenanceRequests"];
   organizationId: string;
@@ -779,24 +688,22 @@ function CustomerOperations({
       <section className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         <Panel
           icon={<FileText className="size-5" aria-hidden="true" />}
-          title="My resident profile"
+          title="My active stay"
           description="Your operational records are scoped to your active organization."
         >
-          {customerProfile ? (
+          {activeAssignment ? (
             <div className="grid gap-2 text-sm">
-              <p className="font-semibold">{customerProfile.fullName}</p>
+              <p className="font-semibold">{activeAssignment.residentFullName}</p>
               <p className="text-muted-foreground">
-                {customerProfile.customerCode} · {customerProfile.phone || "No phone"}
+                {activeAssignment.residentCode} - {activeAssignment.residentPhone || "No phone"}
               </p>
-              {customerProfile.assignments.map((assignment) => (
-                <p key={assignment.id} className="text-muted-foreground">
-                  Active stay: {roomLabel(assignment.room)} since{" "}
-                  {formatDate(assignment.moveInDate)}
-                </p>
-              ))}
+              <p className="text-muted-foreground">
+                Active stay: {roomLabel(activeAssignment.room)} since{" "}
+                {formatDate(activeAssignment.moveInDate)}
+              </p>
             </div>
           ) : (
-            <EmptyState label="No resident profile linked to this app user" />
+            <EmptyState label="No active stay linked to this room login" />
           )}
         </Panel>
 

@@ -28,7 +28,6 @@ if (!anonUsers.error) {
 }
 
 for (const table of [
-  "customer_profiles",
   "room_assignments",
   "contracts",
   "invoices",
@@ -73,7 +72,7 @@ const insertAttempt = await authenticated.from("users").insert({
   auth_user_id: "00000000-0000-0000-0000-000000000001",
   email: "rls-insert-test@example.com",
   display_name: "RLS Insert Test",
-  role: "CUSTOMER",
+  role: "RESIDENT",
   status: "ACTIVE"
 });
 
@@ -81,14 +80,17 @@ if (!insertAttempt.error) {
   throw new Error("Authenticated role unexpectedly inserted public.users.");
 }
 
-const phase8InsertAttempt = await authenticated.from("customer_profiles").insert({
+const phase8InsertAttempt = await authenticated.from("room_assignments").insert({
   organization_id: "00000000-0000-0000-0000-000000000001",
-  customer_code: "rls-insert-test",
-  full_name: "RLS Insert Test"
+  room_id: "00000000-0000-0000-0000-000000000001",
+  resident_code: "rls-insert-test",
+  resident_full_name: "RLS Insert Test",
+  id_document_number: "rls-passport",
+  move_in_date: "2026-08-11"
 });
 
 if (!phase8InsertAttempt.error) {
-  throw new Error("Authenticated role unexpectedly inserted public.customer_profiles.");
+  throw new Error("Authenticated role unexpectedly inserted public.room_assignments.");
 }
 
 await authenticated.auth.signOut();

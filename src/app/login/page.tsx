@@ -11,8 +11,9 @@ type LoginPageProps = {
 };
 
 const errorMessages: Record<string, string> = {
-  "invalid-input": "Enter a valid email and password.",
-  "invalid-credentials": "The email or password is incorrect."
+  "invalid-input": "Enter a valid username or email and password.",
+  "invalid-credentials": "The username/email or password is incorrect.",
+  "no-active-room": "This room login has no active resident assignment."
 };
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
@@ -30,8 +31,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
         <form action={signInWithPassword} className="grid gap-4">
           <label className="grid gap-2 text-sm font-medium">
-            Email
-            <Input name="email" type="email" autoComplete="email" required />
+            Username or email
+            <Input name="identifier" autoComplete="username" required />
           </label>
           <label className="grid gap-2 text-sm font-medium">
             Password

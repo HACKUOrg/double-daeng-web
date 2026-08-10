@@ -27,7 +27,7 @@ export default async function MembershipsPage({
     prisma.user.findMany({
       where: {
         role: {
-          not: "SA"
+          in: ["MANAGER", "OPERATION"]
         }
       },
       orderBy: [{ role: "asc" }, { email: "asc" }]

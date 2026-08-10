@@ -9,7 +9,18 @@ import { getPrisma } from "@/lib/prisma";
 
 const uuidSchema = z.string().uuid();
 const nameSchema = z.string().trim().min(1).max(120);
+const abbreviationSchema = z
+  .string()
+  .trim()
+  .min(2)
+  .max(12)
+  .regex(/^[A-Za-z0-9]+$/)
+  .transform((value) => value.toUpperCase());
 const floorNumberSchema = z.coerce.number().int().min(-10).max(300);
+const moneySchema = z
+  .string()
+  .trim()
+  .regex(/^\d+(\.\d{1,2})?$/);
 
 const organizationStatusSchema = z.enum(["ACTIVE", "SUSPENDED"]);
 const assetTypeSchema = z.enum(["DORMITORY", "CONDO", "APARTMENT", "MIXED"]);
@@ -79,6 +90,7 @@ function assetSnapshot(asset: {
   id: string;
   organizationId: string;
   name: string;
+  abbreviation: string;
   type: string;
   status: string;
 }) {
@@ -86,6 +98,7 @@ function assetSnapshot(asset: {
     id: asset.id,
     organizationId: asset.organizationId,
     name: asset.name,
+    abbreviation: asset.abbreviation,
     type: asset.type,
     status: asset.status
   };
@@ -121,12 +134,16 @@ function roomSnapshot(room: {
   id: string;
   floorId: string;
   roomNumber: string;
+  rentAmount: { toString(): string };
+  depositAmount: { toString(): string };
   status: string;
 }) {
   return {
     id: room.id,
     floorId: room.floorId,
     roomNumber: room.roomNumber,
+    rentAmount: room.rentAmount.toString(),
+    depositAmount: room.depositAmount.toString(),
     status: room.status
   };
 }
@@ -275,11 +292,13 @@ export async function createAsset(formData: FormData) {
     .object({
       organizationId: uuidSchema,
       name: nameSchema,
+      abbreviation: abbreviationSchema,
       type: assetTypeSchema
     })
     .safeParse({
       organizationId: getString(formData, "organizationId"),
       name: getString(formData, "name"),
+      abbreviation: getString(formData, "abbreviation"),
       type: getString(formData, "type")
     });
 
@@ -303,6 +322,7 @@ export async function createAsset(formData: FormData) {
         id: true,
         organizationId: true,
         name: true,
+        abbreviation: true,
         type: true,
         status: true
       }
@@ -330,6 +350,7 @@ export async function updateAsset(formData: FormData) {
       organizationId: uuidSchema,
       assetId: uuidSchema,
       name: nameSchema,
+      abbreviation: abbreviationSchema,
       type: assetTypeSchema,
       status: assetStatusSchema
     })
@@ -337,6 +358,7 @@ export async function updateAsset(formData: FormData) {
       organizationId: getString(formData, "organizationId"),
       assetId: getString(formData, "assetId"),
       name: getString(formData, "name"),
+      abbreviation: getString(formData, "abbreviation"),
       type: getString(formData, "type"),
       status: getString(formData, "status")
     });
@@ -351,6 +373,7 @@ export async function updateAsset(formData: FormData) {
       id: true,
       organizationId: true,
       name: true,
+      abbreviation: true,
       type: true,
       status: true
     }
@@ -369,6 +392,7 @@ export async function updateAsset(formData: FormData) {
       where: { id: parsed.data.assetId },
       data: {
         name: parsed.data.name,
+        abbreviation: parsed.data.abbreviation,
         type: parsed.data.type,
         status: parsed.data.status
       },
@@ -376,6 +400,7 @@ export async function updateAsset(formData: FormData) {
         id: true,
         organizationId: true,
         name: true,
+        abbreviation: true,
         type: true,
         status: true
       }
@@ -419,6 +444,7 @@ export async function deleteAsset(formData: FormData) {
       id: true,
       organizationId: true,
       name: true,
+      abbreviation: true,
       type: true,
       status: true
     }
@@ -847,12 +873,16 @@ export async function createRoom(formData: FormData) {
       organizationId: uuidSchema,
       floorId: uuidSchema,
       roomNumber: nameSchema,
+      rentAmount: moneySchema,
+      depositAmount: moneySchema,
       status: roomStatusSchema
     })
     .safeParse({
       organizationId: getString(formData, "organizationId"),
       floorId: getString(formData, "floorId"),
       roomNumber: getString(formData, "roomNumber"),
+      rentAmount: getString(formData, "rentAmount") || "0",
+      depositAmount: getString(formData, "depositAmount") || "0",
       status: getString(formData, "status") || "VACANT"
     });
 
@@ -888,12 +918,16 @@ export async function createRoom(formData: FormData) {
       data: {
         floorId: parsed.data.floorId,
         roomNumber: parsed.data.roomNumber,
+        rentAmount: parsed.data.rentAmount,
+        depositAmount: parsed.data.depositAmount,
         status: parsed.data.status
       },
       select: {
         id: true,
         floorId: true,
         roomNumber: true,
+        rentAmount: true,
+        depositAmount: true,
         status: true
       }
     });
@@ -919,12 +953,16 @@ export async function updateRoom(formData: FormData) {
       organizationId: uuidSchema,
       roomId: uuidSchema,
       roomNumber: nameSchema,
+      rentAmount: moneySchema,
+      depositAmount: moneySchema,
       status: roomStatusSchema
     })
     .safeParse({
       organizationId: getString(formData, "organizationId"),
       roomId: getString(formData, "roomId"),
       roomNumber: getString(formData, "roomNumber"),
+      rentAmount: getString(formData, "rentAmount") || "0",
+      depositAmount: getString(formData, "depositAmount") || "0",
       status: getString(formData, "status")
     });
 
@@ -938,6 +976,8 @@ export async function updateRoom(formData: FormData) {
       id: true,
       floorId: true,
       roomNumber: true,
+      rentAmount: true,
+      depositAmount: true,
       status: true,
       floor: {
         select: {
@@ -968,12 +1008,16 @@ export async function updateRoom(formData: FormData) {
       where: { id: parsed.data.roomId },
       data: {
         roomNumber: parsed.data.roomNumber,
+        rentAmount: parsed.data.rentAmount,
+        depositAmount: parsed.data.depositAmount,
         status: parsed.data.status
       },
       select: {
         id: true,
         floorId: true,
         roomNumber: true,
+        rentAmount: true,
+        depositAmount: true,
         status: true
       }
     });
@@ -1015,6 +1059,8 @@ export async function deleteRoom(formData: FormData) {
       id: true,
       floorId: true,
       roomNumber: true,
+      rentAmount: true,
+      depositAmount: true,
       status: true,
       floor: {
         select: {

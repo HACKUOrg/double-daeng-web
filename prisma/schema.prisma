@@ -11,7 +11,7 @@ enum UserRole {
   SA
   MANAGER
   OPERATION
-  CUSTOMER
+  RESIDENT
 }
 
 enum UserStatus {
@@ -41,11 +41,6 @@ enum RoomStatus {
   OCCUPIED
   MAINTENANCE
   UNAVAILABLE
-}
-
-enum CustomerProfileStatus {
-  ACTIVE
-  ARCHIVED
 }
 
 enum RoomAssignmentStatus {
@@ -94,13 +89,14 @@ model User {
   email       String     @unique
   displayName String     @map("display_name")
   role        UserRole
+  username    String?    @unique
   status      UserStatus @default(ACTIVE)
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   memberships                 OrganizationMembership[]
   auditLogs                   AuditLog[]               @relation("AuditActor")
-  customerProfiles            CustomerProfile[]
+  roomLoginAssignments        RoomAssignment[]        @relation("RoomLoginUser")
   createdMaintenanceRequests  MaintenanceRequest[]     @relation("MaintenanceCreatedBy")
   assignedMaintenanceRequests MaintenanceRequest[]     @relation("MaintenanceAssignedTo")
   uploadedAttachments         Attachment[]             @relation("AttachmentUploader")
@@ -120,7 +116,6 @@ model Organization {
   memberships         OrganizationMembership[]
   assets              Asset[]
   auditLogs           AuditLog[]
-  customerProfiles    CustomerProfile[]
   roomAssignments     RoomAssignment[]
   contracts           Contract[]
   invoices            Invoice[]
@@ -150,6 +145,7 @@ model Asset {
   id             String      @id @default(uuid()) @db.Uuid
   organizationId String      @map("organization_id") @db.Uuid
   name           String
+  abbreviation   String
   type           AssetType
   status         AssetStatus @default(ACTIVE)
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -160,6 +156,7 @@ model Asset {
 
   @@index([organizationId])
   @@index([status])
+  @@unique([organizationId, abbreviation])
   @@map("assets")
 }
 
@@ -197,6 +194,8 @@ model Room {
   id         String     @id @default(uuid()) @db.Uuid
   floorId    String     @map("floor_id") @db.Uuid
   roomNumber String     @map("room_number")
+  rentAmount Decimal    @default(0) @map("rent_amount") @db.Decimal(12, 2)
+  depositAmount Decimal @default(0) @map("deposit_amount") @db.Decimal(12, 2)
   status     RoomStatus @default(VACANT)
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -211,35 +210,16 @@ model Room {
   @@map("rooms")
 }
 
-model CustomerProfile {
-  id               String                @id @default(uuid()) @db.Uuid
-  organizationId   String                @map("organization_id") @db.Uuid
-  userId           String?               @map("user_id") @db.Uuid
-  customerCode     String                @map("customer_code")
-  fullName         String                @map("full_name")
-  phone            String?
-  emergencyContact String?               @map("emergency_contact")
-  status           CustomerProfileStatus @default(ACTIVE)
-  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
-
-  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user                User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
-  assignments         RoomAssignment[]
-  invoices            Invoice[]
-  maintenanceRequests MaintenanceRequest[]
-
-  @@unique([organizationId, customerCode])
-  @@index([organizationId, status])
-  @@index([userId])
-  @@map("customer_profiles")
-}
-
 model RoomAssignment {
   id                String               @id @default(uuid()) @db.Uuid
   organizationId    String               @map("organization_id") @db.Uuid
   roomId            String               @map("room_id") @db.Uuid
-  customerProfileId String               @map("customer_profile_id") @db.Uuid
+  loginUserId       String?              @map("login_user_id") @db.Uuid
+  residentCode      String               @map("resident_code")
+  residentFullName  String               @map("resident_full_name")
+  residentPhone     String?              @map("resident_phone")
+  emergencyContact  String?              @map("emergency_contact")
+  idDocumentNumber  String               @map("id_document_number")
   status            RoomAssignmentStatus @default(ACTIVE)
   moveInDate        DateTime             @map("move_in_date") @db.Date
   moveOutDate       DateTime?            @map("move_out_date") @db.Date
@@ -248,13 +228,15 @@ model RoomAssignment {
 
   organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   room            Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+  loginUser       User?           @relation("RoomLoginUser", fields: [loginUserId], references: [id], onDelete: SetNull)
   contract        Contract?
   invoices        Invoice[]
+  maintenanceRequests MaintenanceRequest[]
 
   @@index([organizationId, status])
   @@index([roomId, status])
-  @@index([customerProfileId, status])
+  @@index([loginUserId, status])
+  @@unique([organizationId, residentCode])
   @@map("room_assignments")
 }
 
@@ -282,7 +264,6 @@ model Contract {
 model Invoice {
   id                String        @id @default(uuid()) @db.Uuid
   organizationId    String        @map("organization_id") @db.Uuid
-  customerProfileId String        @map("customer_profile_id") @db.Uuid
   roomAssignmentId  String?       @map("room_assignment_id") @db.Uuid
   invoiceNumber     String        @map("invoice_number")
   issueDate         DateTime      @map("issue_date") @db.Date
@@ -294,12 +275,10 @@ model Invoice {
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  customerProfile CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
   roomAssignment  RoomAssignment? @relation(fields: [roomAssignmentId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, invoiceNumber])
   @@index([organizationId, status])
-  @@index([customerProfileId])
   @@index([roomAssignmentId])
   @@map("invoices")
 }
@@ -327,7 +306,7 @@ model MaintenanceRequest {
   id                String              @id @default(uuid()) @db.Uuid
   organizationId    String              @map("organization_id") @db.Uuid
   roomId            String?             @map("room_id") @db.Uuid
-  customerProfileId String?             @map("customer_profile_id") @db.Uuid
+  roomAssignmentId  String?             @map("room_assignment_id") @db.Uuid
   createdByUserId   String?             @map("created_by_user_id") @db.Uuid
   assignedToUserId  String?             @map("assigned_to_user_id") @db.Uuid
   title             String
@@ -339,13 +318,13 @@ model MaintenanceRequest {
 
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   room            Room?            @relation(fields: [roomId], references: [id], onDelete: SetNull)
-  customerProfile CustomerProfile? @relation(fields: [customerProfileId], references: [id], onDelete: SetNull)
+  roomAssignment  RoomAssignment?  @relation(fields: [roomAssignmentId], references: [id], onDelete: SetNull)
   createdBy       User?            @relation("MaintenanceCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   assignedTo      User?            @relation("MaintenanceAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, status])
   @@index([roomId])
-  @@index([customerProfileId])
+  @@index([roomAssignmentId])
   @@index([createdByUserId])
   @@index([assignedToUserId])
   @@map("maintenance_requests")

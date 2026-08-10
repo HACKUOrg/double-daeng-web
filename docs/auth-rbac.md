@@ -10,7 +10,7 @@ authorization.
 | `SA` | `/admin` | Platform system administrator. |
 | `MANAGER` | `/app` | Organization manager. |
 | `OPERATION` | `/app` | Daily operations staff. |
-| `CUSTOMER` | `/app` | Resident or tenant. |
+| `RESIDENT` | `/app` | Room-based resident login. |
 
 ## Role Rules
 
@@ -26,17 +26,17 @@ authorization.
 | --- | --- |
 | `SA` | `admin.access`, `iam.view`, `audit.view`, `organizations.manage`, `memberships.manage`, `users.manage.all`, `assets.manage`, `rooms.manage` |
 | `MANAGER` | `app.access`, `users.manage.organization`, `assets.manage`, `rooms.manage`, `customers.manage` |
-| `OPERATION` | `app.access`, `users.manage.organization`, `customers.manage`, `room_status.update`, `maintenance.manage` |
-| `CUSTOMER` | `app.access`, `own_data.view`, `maintenance.create` |
+| `OPERATION` | `app.access`, `customers.manage`, `room_status.update`, `maintenance.manage` |
+| `RESIDENT` | `app.access`, `own_data.view`, `maintenance.create` |
 
 ## User Creation Rules
 
 | Actor | Can Create | Organization Assignment Scope |
 | --- | --- | --- |
-| `SA` | `MANAGER`, `OPERATION`, `CUSTOMER` | Any organization. |
-| `MANAGER` | `OPERATION`, `CUSTOMER` | Organizations where the Manager is a member. |
-| `OPERATION` | `CUSTOMER` | Organizations where the Operation user is a member. |
-| `CUSTOMER` | None | None. |
+| `SA` | `MANAGER`, `OPERATION` | Any organization. |
+| `MANAGER` | `OPERATION` | Organizations where the Manager is a member. |
+| `OPERATION` | None | None. |
+| `RESIDENT` | None | None. |
 
 ## Membership Rules
 
@@ -48,7 +48,7 @@ authorization.
 - Manager and Operation can assign users only within their own memberships.
 - Manager and Operation can update a managed user only when all of that user's
   memberships are inside the actor's active organization scope.
-- Customer self-assignment is not allowed.
+- Resident room login memberships are created by the move-in flow only.
 
 ## Required Server Checks
 
@@ -70,7 +70,7 @@ Each protected server function should follow this pattern:
 - `src/lib/auth/organization-scope.ts` resolves active `/app` organization
   scope from memberships.
 - `/app` uses the resolved organization scope for role-specific Manager,
-  Operation, and Customer dashboard data.
+  Operation, and Resident dashboard data.
 - `requirePermission()` and `requireAnyPermission()` protect route layouts,
   pages, and server actions.
 - `src/lib/rbac.ts` stores roles, labels, permission ids, permission labels,
@@ -79,22 +79,26 @@ Each protected server function should follow this pattern:
 - `/admin/audit` displays recent audit rows for users with `audit.view`.
 - `/admin/memberships` assigns existing non-SA profiles to organizations.
 - `/admin/users` creates and manages non-SA users directly.
-- `/app/users` lets Manager and Operation manage users inside active
-  organization scope.
+- `/app/users` lets Manager manage Operation users inside active organization
+  scope.
 - `/app/operations` lets Manager and Operation manage operational records
-  inside active organization scope; Customer can view linked records and create
-  maintenance requests.
+  inside active organization scope; Resident room logins can view active-stay
+  records and create maintenance requests.
+- Resident room login users are created during move-in using the room username
+  format `<asset abbreviation><room number>` such as `PT101`.
+- Resident access requires an active room assignment every time protected
+  routes are loaded.
 - Managed user role/status changes are synced to Supabase Auth app metadata;
   app authorization still loads the canonical profile from the database.
 - `pnpm verify:phase5-rbac` verifies permission-based route redirects and
   forbidden server-action submissions.
 - `pnpm verify:phase7-app-foundation` verifies role-specific `/app`
-  dashboards, app navigation, customer access blocking, and organization scope.
+  dashboards, app navigation, resident access blocking, and organization scope.
 - `pnpm verify:phase3-app-scope` verifies `/app` non-SA scope when a dedicated
   Supabase Auth test user is available.
 
 ## Future Considerations
 
-Only add editable permissions after the MVP proves that customers need tenant
+Only add editable permissions after the MVP proves that residents need tenant
 specific role customization. Until then, fixed RBAC keeps implementation and
 support costs lower.

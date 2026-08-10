@@ -7,6 +7,7 @@ import { requireAnyPermission } from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/audit";
 import { getPrisma } from "@/lib/prisma";
 import { type Role } from "@/lib/rbac";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const uuidSchema = z.string().uuid();
 const textSchema = z.string().trim().min(1).max(160);
@@ -19,6 +20,7 @@ const moneySchema = z
   .string()
   .trim()
   .regex(/^\d+(\.\d{1,2})?$/);
+const idDocumentSchema = z.string().trim().min(6).max(64);
 const meterTypeSchema = z.enum(["WATER", "ELECTRIC"]);
 const invoiceStatusSchema = z.enum([
   "DRAFT",
@@ -125,23 +127,35 @@ async function getRoomInOrganization({
   });
 }
 
-async function getCustomerInOrganization({
-  customerProfileId,
+async function getAssignmentInOrganization({
+  assignmentId,
   organizationId,
   prisma
 }: {
-  customerProfileId: string;
+  assignmentId: string;
   organizationId: string;
   prisma: ReturnType<typeof getPrisma>;
 }) {
-  return prisma.customerProfile.findFirst({
+  return prisma.roomAssignment.findFirst({
     where: {
-      id: customerProfileId,
+      id: assignmentId,
       organizationId,
       status: "ACTIVE"
     },
     include: {
-      user: true
+      room: {
+        include: {
+          floor: {
+            include: {
+              building: {
+                include: {
+                  asset: true
+                }
+              }
+            }
+          }
+        }
+      }
     }
   });
 }
@@ -152,75 +166,6 @@ function revalidateOperations(organizationId: string) {
   redirect(operationsPath(organizationId, "updated=operation"));
 }
 
-export async function createCustomerProfile(formData: FormData) {
-  const { actor, organizationId, prisma } = await resolveOperationContext({
-    formData,
-    permissions: ["customers.manage"]
-  });
-  const parsed = z
-    .object({
-      customerCode: textSchema,
-      fullName: textSchema,
-      phone: optionalTextSchema,
-      emergencyContact: optionalTextSchema,
-      userId: z.union([uuidSchema, z.literal("")]).optional()
-    })
-    .safeParse({
-      customerCode: getString(formData, "customerCode"),
-      fullName: getString(formData, "fullName"),
-      phone: getOptionalString(formData, "phone"),
-      emergencyContact: getOptionalString(formData, "emergencyContact"),
-      userId: getString(formData, "userId")
-    });
-
-  if (!parsed.success) {
-    invalidOperation(organizationId);
-  }
-
-  const userId = parsed.data.userId || null;
-
-  if (userId) {
-    const user = await prisma.user.findFirst({
-      where: {
-        id: userId,
-        role: "CUSTOMER",
-        status: "ACTIVE",
-        memberships: {
-          some: {
-            organizationId
-          }
-        }
-      }
-    });
-
-    if (!user) {
-      forbiddenOperation(organizationId);
-    }
-  }
-
-  const customer = await prisma.customerProfile.create({
-    data: {
-      organizationId,
-      userId,
-      customerCode: parsed.data.customerCode,
-      fullName: parsed.data.fullName,
-      phone: parsed.data.phone,
-      emergencyContact: parsed.data.emergencyContact
-    }
-  });
-
-  await writeAuditLog(prisma, {
-    actorUserId: actor.id,
-    action: "customer_profile.create",
-    entityType: "customer_profile",
-    entityId: customer.id,
-    organizationId,
-    after: customer
-  });
-
-  revalidateOperations(organizationId);
-}
-
 export async function assignRoom(formData: FormData) {
   const { actor, organizationId, prisma } = await resolveOperationContext({
     formData,
@@ -229,102 +174,170 @@ export async function assignRoom(formData: FormData) {
   const parsed = z
     .object({
       roomId: uuidSchema,
-      customerProfileId: uuidSchema,
+      residentFullName: textSchema,
+      residentPhone: optionalTextSchema,
+      emergencyContact: optionalTextSchema,
       moveInDate: dateSchema,
-      contractNumber: optionalTextSchema,
-      rentAmount: z.union([moneySchema, z.literal("")]).optional(),
-      depositAmount: z.union([moneySchema, z.literal("")]).optional()
+      idDocumentNumber: idDocumentSchema,
+      contractNumber: optionalTextSchema
     })
     .safeParse({
       roomId: getString(formData, "roomId"),
-      customerProfileId: getString(formData, "customerProfileId"),
+      residentFullName: getString(formData, "residentFullName"),
+      residentPhone: getOptionalString(formData, "residentPhone"),
+      emergencyContact: getOptionalString(formData, "emergencyContact"),
       moveInDate: getString(formData, "moveInDate"),
-      contractNumber: getOptionalString(formData, "contractNumber"),
-      rentAmount: getString(formData, "rentAmount"),
-      depositAmount: getString(formData, "depositAmount")
+      idDocumentNumber: getString(formData, "idDocumentNumber"),
+      contractNumber: getOptionalString(formData, "contractNumber")
     });
 
   if (!parsed.success) {
     invalidOperation(organizationId);
   }
 
-  const [room, customer, activeRoomAssignment, activeCustomerAssignment] =
-    await Promise.all([
-      getRoomInOrganization({
-        organizationId,
-        prisma,
-        roomId: parsed.data.roomId
-      }),
-      getCustomerInOrganization({
-        customerProfileId: parsed.data.customerProfileId,
-        organizationId,
-        prisma
-      }),
-      prisma.roomAssignment.findFirst({
-        where: {
-          roomId: parsed.data.roomId,
-          status: "ACTIVE"
-        }
-      }),
-      prisma.roomAssignment.findFirst({
-        where: {
-          customerProfileId: parsed.data.customerProfileId,
-          status: "ACTIVE"
-        }
-      })
-    ]);
+  const [room, activeRoomAssignment] = await Promise.all([
+    getRoomInOrganization({
+      organizationId,
+      prisma,
+      roomId: parsed.data.roomId
+    }),
+    prisma.roomAssignment.findFirst({
+      where: {
+        roomId: parsed.data.roomId,
+        status: "ACTIVE"
+      }
+    })
+  ]);
 
-  if (!room || !customer || activeRoomAssignment || activeCustomerAssignment) {
+  if (!room || activeRoomAssignment) {
     invalidOperation(organizationId);
   }
 
-  const assignment = await prisma.$transaction(async (tx) => {
-    const created = await tx.roomAssignment.create({
-      data: {
-        organizationId,
-        roomId: parsed.data.roomId,
-        customerProfileId: parsed.data.customerProfileId,
-        moveInDate: parsed.data.moveInDate
-      }
-    });
-
-    await tx.room.update({
+  const loginUsername =
+    `${room.floor.building.asset.abbreviation}${room.roomNumber}`.toUpperCase();
+  const loginEmail = `${loginUsername.toLowerCase()}@rooms.double-daeng.local`;
+  const [existingLoginUser, existingResidentCode] = await Promise.all([
+    prisma.user.findFirst({
       where: {
-        id: parsed.data.roomId
+        username: loginUsername
       },
-      data: {
-        status: "OCCUPIED"
+      select: {
+        id: true
       }
-    });
+    }),
+    prisma.roomAssignment.findFirst({
+      where: {
+        organizationId,
+        residentCode: loginUsername
+      },
+      select: {
+        id: true
+      }
+    })
+  ]);
 
-    if (parsed.data.contractNumber && parsed.data.rentAmount) {
-      await tx.contract.create({
+  if (existingLoginUser || existingResidentCode) {
+    invalidOperation(organizationId);
+  }
+
+  const supabaseAdmin = createAdminClient();
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email: loginEmail,
+    password: parsed.data.idDocumentNumber,
+    email_confirm: true,
+    app_metadata: {
+      role: "RESIDENT",
+      status: "ACTIVE",
+      login_type: "room"
+    },
+    user_metadata: {
+      display_name: loginUsername
+    }
+  });
+  const authUserId = data.user?.id;
+
+  if (error || !authUserId) {
+    invalidOperation(organizationId);
+  }
+
+  let assignmentId: string | null = null;
+
+  try {
+    const assignment = await prisma.$transaction(async (tx) => {
+      const loginUser = await tx.user.create({
         data: {
-          organizationId,
-          assignmentId: created.id,
-          contractNumber: parsed.data.contractNumber,
-          startDate: parsed.data.moveInDate,
-          rentAmount: parsed.data.rentAmount,
-          depositAmount: parsed.data.depositAmount || "0"
+          authUserId,
+          email: loginEmail,
+          username: loginUsername,
+          displayName: loginUsername,
+          role: "RESIDENT",
+          status: "ACTIVE",
+          memberships: {
+            create: {
+              organizationId
+            }
+          }
         }
       });
-    }
 
-    await writeAuditLog(tx, {
-      actorUserId: actor.id,
-      action: "room_assignment.create",
-      entityType: "room_assignment",
-      entityId: created.id,
-      organizationId,
-      after: {
-        assignment: created,
-        roomNumber: room.roomNumber,
-        customer: customer.fullName
+      const created = await tx.roomAssignment.create({
+        data: {
+          organizationId,
+          roomId: parsed.data.roomId,
+          loginUserId: loginUser.id,
+          residentCode: loginUsername,
+          residentFullName: parsed.data.residentFullName,
+          residentPhone: parsed.data.residentPhone,
+          emergencyContact: parsed.data.emergencyContact,
+          idDocumentNumber: parsed.data.idDocumentNumber,
+          moveInDate: parsed.data.moveInDate
+        }
+      });
+
+      await tx.room.update({
+        where: {
+          id: parsed.data.roomId
+        },
+        data: {
+          status: "OCCUPIED"
+        }
+      });
+
+      if (parsed.data.contractNumber) {
+        await tx.contract.create({
+          data: {
+            organizationId,
+            assignmentId: created.id,
+            contractNumber: parsed.data.contractNumber,
+            startDate: parsed.data.moveInDate,
+            rentAmount: room.rentAmount,
+            depositAmount: room.depositAmount
+          }
+        });
       }
+
+      await writeAuditLog(tx, {
+        actorUserId: actor.id,
+        action: "room_assignment.create",
+        entityType: "room_assignment",
+        entityId: created.id,
+        organizationId,
+        after: {
+          assignment: created,
+          loginUsername,
+          roomNumber: room.roomNumber,
+          resident: parsed.data.residentFullName
+        }
+      });
+
+      return created;
     });
 
-    return created;
-  });
+    assignmentId = assignment.id;
+  } catch (error) {
+    await supabaseAdmin.auth.admin.deleteUser(authUserId);
+    throw error;
+  }
 
   await writeAuditLog(prisma, {
     actorUserId: actor.id,
@@ -333,7 +346,7 @@ export async function assignRoom(formData: FormData) {
     entityId: parsed.data.roomId,
     organizationId,
     after: {
-      assignmentId: assignment.id,
+      assignmentId,
       status: "OCCUPIED"
     }
   });
@@ -348,8 +361,7 @@ export async function createInvoice(formData: FormData) {
   });
   const parsed = z
     .object({
-      customerProfileId: uuidSchema,
-      roomAssignmentId: z.union([uuidSchema, z.literal("")]).optional(),
+      roomAssignmentId: uuidSchema,
       invoiceNumber: textSchema,
       issueDate: dateSchema,
       dueDate: dateSchema,
@@ -357,7 +369,6 @@ export async function createInvoice(formData: FormData) {
       status: invoiceStatusSchema
     })
     .safeParse({
-      customerProfileId: getString(formData, "customerProfileId"),
       roomAssignmentId: getString(formData, "roomAssignmentId"),
       invoiceNumber: getString(formData, "invoiceNumber"),
       issueDate: getString(formData, "issueDate"),
@@ -370,37 +381,20 @@ export async function createInvoice(formData: FormData) {
     invalidOperation(organizationId);
   }
 
-  const customer = await getCustomerInOrganization({
-    customerProfileId: parsed.data.customerProfileId,
+  const assignment = await getAssignmentInOrganization({
+    assignmentId: parsed.data.roomAssignmentId,
     organizationId,
     prisma
   });
 
-  if (!customer) {
+  if (!assignment) {
     invalidOperation(organizationId);
-  }
-
-  const roomAssignmentId = parsed.data.roomAssignmentId || null;
-
-  if (roomAssignmentId) {
-    const assignment = await prisma.roomAssignment.findFirst({
-      where: {
-        id: roomAssignmentId,
-        customerProfileId: parsed.data.customerProfileId,
-        organizationId
-      }
-    });
-
-    if (!assignment) {
-      invalidOperation(organizationId);
-    }
   }
 
   const invoice = await prisma.invoice.create({
     data: {
       organizationId,
-      customerProfileId: parsed.data.customerProfileId,
-      roomAssignmentId,
+      roomAssignmentId: parsed.data.roomAssignmentId,
       invoiceNumber: parsed.data.invoiceNumber,
       issueDate: parsed.data.issueDate,
       dueDate: parsed.data.dueDate,
@@ -489,14 +483,14 @@ export async function createMaintenanceRequest(formData: FormData) {
   const parsed = z
     .object({
       roomId: z.union([uuidSchema, z.literal("")]).optional(),
-      customerProfileId: z.union([uuidSchema, z.literal("")]).optional(),
+      roomAssignmentId: z.union([uuidSchema, z.literal("")]).optional(),
       title: textSchema,
       description: z.string().trim().min(1).max(1000),
       priority: maintenancePrioritySchema
     })
     .safeParse({
       roomId: getString(formData, "roomId"),
-      customerProfileId: getString(formData, "customerProfileId"),
+      roomAssignmentId: getString(formData, "roomAssignmentId"),
       title: getString(formData, "title"),
       description: getString(formData, "description"),
       priority: getString(formData, "priority") || "MEDIUM"
@@ -506,35 +500,46 @@ export async function createMaintenanceRequest(formData: FormData) {
     invalidOperation(organizationId);
   }
 
-  let customerProfileId = parsed.data.customerProfileId || null;
+  let roomAssignmentId = parsed.data.roomAssignmentId || null;
 
-  if (actorRole === "CUSTOMER") {
-    const ownProfile = await prisma.customerProfile.findFirst({
+  let ownAssignmentRoomId: string | null = null;
+
+  if (actorRole === "RESIDENT") {
+    const ownAssignment = await prisma.roomAssignment.findFirst({
       where: {
         organizationId,
-        userId: actor.id,
+        loginUserId: actor.id,
         status: "ACTIVE"
+      },
+      select: {
+        id: true,
+        roomId: true
       }
     });
 
-    if (!ownProfile) {
+    if (!ownAssignment) {
       forbiddenOperation(organizationId);
     }
 
-    customerProfileId = ownProfile.id;
-  } else if (customerProfileId) {
-    const customer = await getCustomerInOrganization({
-      customerProfileId,
+    roomAssignmentId = ownAssignment.id;
+    ownAssignmentRoomId = ownAssignment.roomId;
+  } else if (roomAssignmentId) {
+    const assignment = await getAssignmentInOrganization({
+      assignmentId: roomAssignmentId,
       organizationId,
       prisma
     });
 
-    if (!customer) {
+    if (!assignment) {
       invalidOperation(organizationId);
     }
   }
 
   const roomId = parsed.data.roomId || null;
+
+  if (actorRole === "RESIDENT" && roomId && roomId !== ownAssignmentRoomId) {
+    forbiddenOperation(organizationId);
+  }
 
   if (roomId) {
     const room = await getRoomInOrganization({
@@ -552,7 +557,7 @@ export async function createMaintenanceRequest(formData: FormData) {
     data: {
       organizationId,
       roomId,
-      customerProfileId,
+      roomAssignmentId,
       createdByUserId: actor.id,
       title: parsed.data.title,
       description: parsed.data.description,

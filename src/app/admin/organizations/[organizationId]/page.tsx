@@ -156,12 +156,23 @@ export default async function OrganizationDetailPage({
         </div>
         <form
           action={createAsset}
-          className="grid gap-3 md:grid-cols-[1fr_180px_auto]"
+          className="grid gap-3 md:grid-cols-[1fr_140px_180px_auto]"
         >
           <input type="hidden" name="organizationId" value={organization.id} />
           <label className="grid gap-2 text-sm font-medium">
             Asset name
             <Input name="name" placeholder="Main Tower" required />
+          </label>
+          <label className="grid gap-2 text-sm font-medium">
+            Abbreviation
+            <Input
+              name="abbreviation"
+              placeholder="PT"
+              pattern="[A-Za-z0-9]+"
+              minLength={2}
+              maxLength={12}
+              required
+            />
           </label>
           <label className="grid gap-2 text-sm font-medium">
             Type
@@ -196,6 +207,9 @@ export default async function OrganizationDetailPage({
                       <h2 className="text-xl font-semibold">{asset.name}</h2>
                       <StatusPill status={asset.status} />
                       <span className="rounded-full border bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                        {asset.abbreviation}
+                      </span>
+                      <span className="rounded-full border bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">
                         {asset.type}
                       </span>
                     </div>
@@ -207,7 +221,7 @@ export default async function OrganizationDetailPage({
 
                 <form
                   action={updateAsset}
-                  className="mt-4 grid gap-3 md:grid-cols-[1fr_160px_160px_auto]"
+                  className="mt-4 grid gap-3 md:grid-cols-[1fr_140px_160px_160px_auto]"
                 >
                   <input
                     type="hidden"
@@ -218,6 +232,17 @@ export default async function OrganizationDetailPage({
                   <label className="grid gap-2 text-sm font-medium">
                     Name
                     <Input name="name" defaultValue={asset.name} required />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
+                    Abbreviation
+                    <Input
+                      name="abbreviation"
+                      defaultValue={asset.abbreviation}
+                      pattern="[A-Za-z0-9]+"
+                      minLength={2}
+                      maxLength={12}
+                      required
+                    />
                   </label>
                   <label className="grid gap-2 text-sm font-medium">
                     Type
@@ -442,7 +467,7 @@ export default async function OrganizationDetailPage({
 
                               <form
                                 action={createRoom}
-                                className="mt-3 grid gap-3 md:grid-cols-[1fr_180px_auto]"
+                                className="mt-3 grid gap-3 md:grid-cols-[1fr_150px_150px_180px_auto]"
                               >
                                 <input
                                   type="hidden"
@@ -455,6 +480,24 @@ export default async function OrganizationDetailPage({
                                   <Input
                                     name="roomNumber"
                                     placeholder="101"
+                                    required
+                                  />
+                                </label>
+                                <label className="grid gap-2 text-sm font-medium">
+                                  Rent
+                                  <Input
+                                    name="rentAmount"
+                                    inputMode="decimal"
+                                    defaultValue="0"
+                                    required
+                                  />
+                                </label>
+                                <label className="grid gap-2 text-sm font-medium">
+                                  Deposit
+                                  <Input
+                                    name="depositAmount"
+                                    inputMode="decimal"
+                                    defaultValue="0"
                                     required
                                   />
                                 </label>
@@ -508,6 +551,22 @@ export default async function OrganizationDetailPage({
                                         <Input
                                           name="roomNumber"
                                           defaultValue={room.roomNumber}
+                                          className="h-9"
+                                          required
+                                        />
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <Input
+                                          name="rentAmount"
+                                          inputMode="decimal"
+                                          defaultValue={formatMoney(room.rentAmount)}
+                                          className="h-9"
+                                          required
+                                        />
+                                        <Input
+                                          name="depositAmount"
+                                          inputMode="decimal"
+                                          defaultValue={formatMoney(room.depositAmount)}
                                           className="h-9"
                                           required
                                         />
@@ -636,6 +695,10 @@ function StatusPill({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+function formatMoney(value: { toString(): string }) {
+  return Number(value.toString()).toFixed(2);
 }
 
 function EmptyLine({ text }: { text: string }) {

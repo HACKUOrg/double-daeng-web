@@ -35,20 +35,21 @@ foundation is now in progress:
 - Prisma schema has the MVP entities, operational entities, and enums.
 - Login/logout server actions exist.
 - `/admin` is reserved for `SA`.
-- `/app` is reserved for `MANAGER`, `OPERATION`, and `CUSTOMER`.
+- `/app` is reserved for `MANAGER`, `OPERATION`, and room-based `RESIDENT`
+  logins.
 - `/admin/iam` shows the fixed RBAC map.
 - `/admin/organizations` manages the organization and property hierarchy.
 - `/admin/memberships` assigns existing non-SA users to organizations.
 - `/app` resolves active organization scope from memberships and shows
-  role-specific Manager, Operation, and Customer dashboards.
-- `/admin/users` and `/app/users` manage direct user creation and password
-  resets without invitations.
+  role-specific Manager, Operation, and Resident dashboards.
+- `/admin/users` and `/app/users` manage staff user creation and password
+  resets without invitations; resident logins are created by move-in.
 - `src/lib/rbac.ts` stores fixed permission ids and role mappings.
 - Permission guards protect route layouts, pages, and key server actions.
 - `/admin/audit` shows recent audit rows with filters and before/after
   snapshots.
-- `/app/operations` supports Phase 8 customer profiles, active stays,
-  contract records, invoices, meter readings, and maintenance requests.
+- `/app/operations` supports Phase 8 move-ins, active stays, contract records,
+  invoices, meter readings, and maintenance requests.
 
 The database is not connected until `.env.local` is filled with a real Supabase
 project and migrations are applied.

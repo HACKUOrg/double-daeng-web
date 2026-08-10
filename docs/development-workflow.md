@@ -51,13 +51,13 @@ to create and clean up temporary Auth users.
 The Phase 6 audit verifier checks the `SA` audit page, filters, before/after
 snapshot rendering, and non-SA access blocking.
 
-The Phase 7 app foundation verifier checks Manager, Operation, and Customer
-dashboards, role-aware app navigation, blocked customer user management, and
-organization scope redirects.
+The Phase 7 app foundation verifier predates the resident-login restructure and
+needs a rewrite before it can validate the current Manager, Operation, and
+Resident dashboard model.
 
 The Phase 8 core operations verifier checks operational table writes, server
 actions, role-specific `/app/operations` views, organization scope blocking,
-and audit rows for customer, stay, invoice, meter, and maintenance workflows.
+and audit rows for move-in, stay, invoice, meter, and maintenance workflows.
 
 When a dedicated non-SA Supabase Auth test user is available, set
 `PHASE3_APP_EMAIL` and `PHASE3_APP_PASSWORD`, then run:

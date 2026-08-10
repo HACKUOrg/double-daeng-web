@@ -23,10 +23,8 @@ if (!supabaseUrl || !secretKey || !connectionString) {
 const ids = {
   managerUser: randomUUID(),
   operationUser: randomUUID(),
-  customerUser: randomUUID(),
   managerMembership: randomUUID(),
   operationMembership: randomUUID(),
-  customerMembership: randomUUID(),
   organization: randomUUID(),
   outsideOrganization: randomUUID(),
   asset: randomUUID(),
@@ -41,18 +39,18 @@ const fixture = {
   organization: `Phase8 Operations Org ${suffix}`,
   outsideOrganization: `Phase8 Outside Org ${suffix}`,
   asset: `Phase8 Asset ${suffix}`,
+  assetAbbreviation: `P8${suffix.slice(0, 4)}`.toUpperCase(),
   outsideAsset: `Phase8 Outside Asset ${suffix}`,
+  outsideAssetAbbreviation: `O8${suffix.slice(0, 4)}`.toUpperCase(),
   managerEmail: `phase8-manager-${suffix}@example.test`,
   managerPassword: `Phase8Manager!${suffix}Aa`,
   managerDisplayName: `Phase8 Manager ${suffix}`,
   operationEmail: `phase8-operation-${suffix}@example.test`,
   operationPassword: `Phase8Operation!${suffix}Aa`,
   operationDisplayName: `Phase8 Operation ${suffix}`,
-  customerEmail: `phase8-customer-${suffix}@example.test`,
-  customerPassword: `Phase8Customer!${suffix}Aa`,
-  customerDisplayName: `Phase8 Customer ${suffix}`,
-  customerCode: `P8-${suffix}`,
-  customerFullName: `Phase8 Resident ${suffix}`,
+  residentPassword: `123456${suffix}`,
+  residentCode: `P8${suffix.slice(0, 4)}801`.toUpperCase(),
+  residentFullName: `Phase8 Resident ${suffix}`,
   contractNumber: `P8-C-${suffix}`,
   invoiceNumber: `P8-I-${suffix}`,
   maintenanceTitle: `Phase8 Leaky Faucet ${suffix}`
@@ -117,7 +115,7 @@ async function createAuthUser({ displayName, email, password, role }) {
 }
 
 async function createFixture(client) {
-  const [managerAuthId, operationAuthId, customerAuthId] = await Promise.all([
+  const [managerAuthId, operationAuthId] = await Promise.all([
     createAuthUser({
       displayName: fixture.managerDisplayName,
       email: fixture.managerEmail,
@@ -130,12 +128,6 @@ async function createFixture(client) {
       password: fixture.operationPassword,
       role: "OPERATION"
     }),
-    createAuthUser({
-      displayName: fixture.customerDisplayName,
-      email: fixture.customerEmail,
-      password: fixture.customerPassword,
-      role: "CUSTOMER"
-    })
   ]);
 
   await client.query(
@@ -155,8 +147,7 @@ async function createFixture(client) {
       insert into public.users (id, auth_user_id, email, display_name, role, status, updated_at)
       values
         ($1, $2, $3, $4, 'MANAGER', 'ACTIVE', now()),
-        ($5, $6, $7, $8, 'OPERATION', 'ACTIVE', now()),
-        ($9, $10, $11, $12, 'CUSTOMER', 'ACTIVE', now())
+        ($5, $6, $7, $8, 'OPERATION', 'ACTIVE', now())
     `,
     [
       ids.managerUser,
@@ -166,42 +157,38 @@ async function createFixture(client) {
       ids.operationUser,
       operationAuthId,
       fixture.operationEmail,
-      fixture.operationDisplayName,
-      ids.customerUser,
-      customerAuthId,
-      fixture.customerEmail,
-      fixture.customerDisplayName
+      fixture.operationDisplayName
     ]
   );
   await client.query(
     `
       insert into public.organization_memberships (id, user_id, organization_id)
-      values ($1, $2, $7), ($3, $4, $7), ($5, $6, $7)
+      values ($1, $2, $5), ($3, $4, $5)
     `,
     [
       ids.managerMembership,
       ids.managerUser,
       ids.operationMembership,
       ids.operationUser,
-      ids.customerMembership,
-      ids.customerUser,
       ids.organization
     ]
   );
   await client.query(
     `
-      insert into public.assets (id, organization_id, name, type, status, updated_at)
+      insert into public.assets (id, organization_id, name, abbreviation, type, status, updated_at)
       values
-        ($1, $2, $3, 'DORMITORY', 'ACTIVE', now()),
-        ($4, $5, $6, 'DORMITORY', 'ACTIVE', now())
+        ($1, $2, $3, $4, 'DORMITORY', 'ACTIVE', now()),
+        ($5, $6, $7, $8, 'DORMITORY', 'ACTIVE', now())
     `,
     [
       ids.asset,
       ids.organization,
       fixture.asset,
+      fixture.assetAbbreviation,
       ids.outsideAsset,
       ids.outsideOrganization,
-      fixture.outsideAsset
+      fixture.outsideAsset,
+      fixture.outsideAssetAbbreviation
     ]
   );
   await client.query(
@@ -220,32 +207,23 @@ async function createFixture(client) {
   );
   await client.query(
     `
-      insert into public.rooms (id, floor_id, room_number, status, updated_at)
+      insert into public.rooms (id, floor_id, room_number, rent_amount, deposit_amount, status, updated_at)
       values
-        ($1, $3, '801', 'VACANT', now()),
-        ($2, $3, '802', 'VACANT', now())
+        ($1, $3, '801', 12000.00, 24000.00, 'VACANT', now()),
+        ($2, $3, '802', 13000.00, 26000.00, 'VACANT', now())
     `,
     [ids.roomOne, ids.roomTwo, ids.floor]
   );
 }
 
 async function cleanupFixture(client) {
-  const customerProfileIds = await client.query(
-    "select id from public.customer_profiles where organization_id = $1",
-    [ids.organization]
+  const residentAuthUsers = await client.query(
+    "select auth_user_id from public.users where username = $1",
+    [`${fixture.assetAbbreviation}801`]
   );
-  const customerIds = customerProfileIds.rows.map((row) => row.id);
-
-  if (customerIds.length) {
-    await client.query(
-      "delete from public.audit_logs where entity_id = any($1::uuid[]) or organization_id = $2",
-      [customerIds, ids.organization]
-    );
-  } else {
-    await client.query("delete from public.audit_logs where organization_id = $1", [
-      ids.organization
-    ]);
-  }
+  await client.query("delete from public.audit_logs where organization_id = $1", [
+    ids.organization
+  ]);
 
   await client.query("delete from public.attachments where organization_id = $1", [
     ids.organization
@@ -266,9 +244,6 @@ async function cleanupFixture(client) {
   await client.query("delete from public.room_assignments where organization_id = $1", [
     ids.organization
   ]);
-  await client.query("delete from public.customer_profiles where organization_id = $1", [
-    ids.organization
-  ]);
   await client.query("delete from public.rooms where id in ($1, $2)", [
     ids.roomOne,
     ids.roomTwo
@@ -280,13 +255,13 @@ async function cleanupFixture(client) {
     ids.outsideAsset
   ]);
   await client.query(
-    "delete from public.organization_memberships where id in ($1, $2, $3)",
-    [ids.managerMembership, ids.operationMembership, ids.customerMembership]
+    "delete from public.organization_memberships where organization_id = $1",
+    [ids.organization]
   );
-  await client.query("delete from public.users where id in ($1, $2, $3)", [
+  await client.query("delete from public.users where id in ($1, $2) or username = $3", [
     ids.managerUser,
     ids.operationUser,
-    ids.customerUser
+    `${fixture.assetAbbreviation}801`
   ]);
   await client.query("delete from public.organizations where id in ($1, $2)", [
     ids.organization,
@@ -294,12 +269,17 @@ async function cleanupFixture(client) {
   ]);
 
   const admin = createAdmin();
-  for (const authUserId of createdAuthUserIds) {
+  const authUserIds = [
+    ...createdAuthUserIds,
+    ...residentAuthUsers.rows.map((row) => row.auth_user_id)
+  ];
+
+  for (const authUserId of authUserIds) {
     await admin.auth.admin.deleteUser(authUserId);
   }
 }
 
-async function login(email, password) {
+async function login(identifier, password) {
   const loginPage = await fetch(`${baseUrl}/login`, {
     signal: AbortSignal.timeout(requestTimeout)
   });
@@ -307,7 +287,7 @@ async function login(email, password) {
   const actionId = findServerActionId(loginHtml, "password");
   const form = new FormData();
   form.set(actionId, "");
-  form.set("email", email);
+  form.set("identifier", identifier);
   form.set("password", password);
 
   const response = await fetch(`${baseUrl}/login`, {
@@ -323,7 +303,9 @@ async function login(email, password) {
   const cookies = getSetCookies(response.headers);
 
   if (!cookies.length) {
-    throw new Error(`Login did not set cookies for ${email}. status=${response.status}`);
+    throw new Error(
+      `Login did not set cookies for ${identifier}. status=${response.status}`
+    );
   }
 
   return cookieHeader(cookies);
@@ -369,24 +351,10 @@ async function postAction(path, cookies, marker, fields) {
   }
 }
 
-async function getCustomerProfileId(client) {
-  const result = await client.query(
-    "select id from public.customer_profiles where organization_id = $1 and customer_code = $2",
-    [ids.organization, fixture.customerCode]
-  );
-  const id = result.rows[0]?.id;
-
-  if (!id) {
-    throw new Error("Customer profile was not created.");
-  }
-
-  return id;
-}
-
 async function getAssignmentId(client) {
   const result = await client.query(
-    "select id from public.room_assignments where organization_id = $1 and status = 'ACTIVE'",
-    [ids.organization]
+    "select id from public.room_assignments where organization_id = $1 and resident_code = $2 and status = 'ACTIVE'",
+    [ids.organization, fixture.residentCode]
   );
   const id = result.rows[0]?.id;
 
@@ -423,8 +391,7 @@ async function assertManagerPage(cookies) {
 
   for (const expected of [
     "Core operations",
-    "Customer profile",
-    "Move-in / room assignment",
+    "Move-in",
     "Monthly invoice",
     "Meter reading",
     "Maintenance",
@@ -455,14 +422,14 @@ async function assertBlockedOutsideScope(cookies) {
   }
 }
 
-async function assertFinalPages({ customerCookies, managerCookies }) {
+async function assertFinalPages({ managerCookies, residentCookies }) {
   const manager = await fetchAuthed(
     `/app/operations?organizationId=${ids.organization}`,
     managerCookies
   );
 
   for (const expected of [
-    fixture.customerFullName,
+    fixture.residentFullName,
     fixture.contractNumber,
     fixture.invoiceNumber,
     fixture.maintenanceTitle,
@@ -474,24 +441,24 @@ async function assertFinalPages({ customerCookies, managerCookies }) {
     }
   }
 
-  const customer = await fetchAuthed(
+  const resident = await fetchAuthed(
     `/app/operations?organizationId=${ids.organization}`,
-    customerCookies
+    residentCookies
   );
 
   for (const expected of [
-    "My resident profile",
-    fixture.customerFullName,
+    "My active stay",
+    fixture.residentFullName,
     fixture.invoiceNumber,
     fixture.maintenanceTitle
   ]) {
-    if (!customer.html.includes(expected)) {
-      throw new Error(`Customer final page missing ${expected}`);
+    if (!resident.html.includes(expected)) {
+      throw new Error(`Resident final page missing ${expected}`);
     }
   }
 
-  if (customer.html.includes("Customer profile") || customer.html.includes("Monthly invoice")) {
-    throw new Error("Customer page exposed staff operation forms.");
+  if (resident.html.includes("Move-in") || resident.html.includes("Monthly invoice")) {
+    throw new Error("Resident page exposed staff operation forms.");
   }
 }
 
@@ -499,14 +466,13 @@ async function assertDatabaseState(client) {
   const result = await client.query(
     `
       select
-        (select count(*) from public.customer_profiles where organization_id = $1) as customers,
-        (select count(*) from public.room_assignments where organization_id = $1 and status = 'ACTIVE') as assignments,
+        (select count(*) from public.room_assignments where organization_id = $1 and status = 'ACTIVE') as active_stays,
         (select count(*) from public.contracts where organization_id = $1) as contracts,
         (select count(*) from public.invoices where organization_id = $1) as invoices,
         (select count(*) from public.meter_readings where organization_id = $1) as meter_readings,
         (select count(*) from public.maintenance_requests where organization_id = $1 and status = 'RESOLVED') as resolved_maintenance,
+        (select count(*) from public.users where username = $2 and role = 'RESIDENT') as resident_users,
         (select count(*) from public.audit_logs where organization_id = $1 and action in (
-          'customer_profile.create',
           'room_assignment.create',
           'invoice.create',
           'meter_reading.create',
@@ -514,7 +480,7 @@ async function assertDatabaseState(client) {
           'maintenance_request.update'
         )) as audits
     `,
-    [ids.organization]
+    [ids.organization, `${fixture.assetAbbreviation}801`]
   );
   const row = result.rows[0];
 
@@ -531,40 +497,33 @@ await client.connect();
 
 try {
   await createFixture(client);
-  const [managerCookies, operationCookies, customerCookies] = await Promise.all([
+  const [managerCookies, operationCookies] = await Promise.all([
     login(fixture.managerEmail, fixture.managerPassword),
-    login(fixture.operationEmail, fixture.operationPassword),
-    login(fixture.customerEmail, fixture.customerPassword)
+    login(fixture.operationEmail, fixture.operationPassword)
   ]);
   const operationsPath = `/app/operations?organizationId=${ids.organization}`;
 
   await assertManagerPage(managerCookies);
   await assertBlockedOutsideScope(managerCookies);
 
-  await postAction(operationsPath, managerCookies, 'name="customerCode"', {
-    organizationId: ids.organization,
-    customerCode: fixture.customerCode,
-    fullName: fixture.customerFullName,
-    phone: "0812345678",
-    emergencyContact: "Emergency Contact",
-    userId: ids.customerUser
-  });
-  const customerProfileId = await getCustomerProfileId(client);
-
   await postAction(operationsPath, managerCookies, 'name="moveInDate"', {
     organizationId: ids.organization,
-    customerProfileId,
     roomId: ids.roomOne,
+    residentFullName: fixture.residentFullName,
+    residentPhone: "0812345678",
+    emergencyContact: "Emergency Contact",
     moveInDate: "2026-08-08",
-    contractNumber: fixture.contractNumber,
-    rentAmount: "12000.00",
-    depositAmount: "24000.00"
+    idDocumentNumber: fixture.residentPassword,
+    contractNumber: fixture.contractNumber
   });
   const assignmentId = await getAssignmentId(client);
+  const residentCookies = await login(
+    `${fixture.assetAbbreviation}801`,
+    fixture.residentPassword
+  );
 
   await postAction(operationsPath, managerCookies, 'name="invoiceNumber"', {
     organizationId: ids.organization,
-    customerProfileId,
     roomAssignmentId: assignmentId,
     invoiceNumber: fixture.invoiceNumber,
     issueDate: "2026-08-08",
@@ -582,7 +541,7 @@ try {
     note: "Phase 8 verify"
   });
 
-  await postAction(operationsPath, customerCookies, 'Send request', {
+  await postAction(operationsPath, residentCookies, 'Send request', {
     organizationId: ids.organization,
     roomId: ids.roomOne,
     title: fixture.maintenanceTitle,
@@ -598,7 +557,7 @@ try {
     assignedToUserId: ids.operationUser
   });
 
-  await assertFinalPages({ customerCookies, managerCookies });
+  await assertFinalPages({ managerCookies, residentCookies });
   await assertDatabaseState(client);
 
   console.log("PHASE8_CORE_OPERATIONS_OK");
