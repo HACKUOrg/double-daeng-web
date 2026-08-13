@@ -1,5 +1,4 @@
 import { KeyRound, RefreshCw, UserPlus, Users } from "lucide-react";
-import { OrganizationSwitcher } from "@/app/app/_components/organization-switcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { resolveActiveOrganization } from "@/lib/auth/organization-scope";
@@ -86,12 +85,11 @@ export default async function AppUsersPage({ searchParams }: AppUsersPageProps) 
           </p>
         </div>
         {activeOrganization ? (
-          <div className="md:min-w-72">
-            <OrganizationSwitcher
-              activeOrganizationId={activeOrganization.id}
-              action="/app/users"
-              memberships={activeMemberships}
-            />
+          <div className="rounded-lg border bg-card px-4 py-3 text-sm md:min-w-64">
+            <p className="text-xs font-medium uppercase text-muted-foreground">
+              Active organization
+            </p>
+            <p className="mt-1 font-semibold">{activeOrganization.name}</p>
           </div>
         ) : null}
       </section>

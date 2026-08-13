@@ -53,16 +53,45 @@ function getOptionalString(formData: FormData, key: string) {
   return value || undefined;
 }
 
-function operationsPath(organizationId: string, search: string) {
-  return `/app/operations?organizationId=${organizationId}&${search}`;
+function operationsPath(
+  organizationId: string,
+  search: string,
+  formData?: FormData
+) {
+  const rawReturnPath = formData ? getString(formData, "returnPath") : "";
+  let pathname = "/app/operations";
+
+  if (rawReturnPath) {
+    try {
+      const url = new URL(rawReturnPath, "http://double-daeng.local");
+      const allowedPath =
+        url.pathname === "/app/operations" ||
+        url.pathname.startsWith("/app/operations/") ||
+        url.pathname === "/app/rooms" ||
+        url.pathname.startsWith("/app/rooms/");
+
+      if (allowedPath) {
+        pathname = url.pathname;
+      }
+    } catch {
+      pathname = "/app/operations";
+    }
+  }
+
+  const params = new URLSearchParams(search);
+  params.set("organizationId", organizationId);
+
+  return `${pathname}?${params.toString()}`;
 }
 
-function invalidOperation(organizationId: string): never {
-  redirect(operationsPath(organizationId, "error=invalid-operation"));
+function invalidOperation(organizationId: string, formData?: FormData): never {
+  redirect(operationsPath(organizationId, "error=invalid-operation", formData));
 }
 
-function forbiddenOperation(organizationId: string): never {
-  redirect(operationsPath(organizationId, "error=forbidden-operation"));
+function forbiddenOperation(organizationId: string, formData?: FormData): never {
+  redirect(
+    operationsPath(organizationId, "error=forbidden-operation", formData)
+  );
 }
 
 async function resolveOperationContext({
@@ -199,10 +228,11 @@ async function getAssignmentInOrganization({
   });
 }
 
-function revalidateOperations(organizationId: string) {
+function revalidateOperations(organizationId: string, formData: FormData) {
   revalidatePath("/app");
   revalidatePath("/app/operations");
-  redirect(operationsPath(organizationId, "updated=operation"));
+  revalidatePath("/app/rooms");
+  redirect(operationsPath(organizationId, "updated=operation", formData));
 }
 
 export async function assignRoom(formData: FormData) {
@@ -233,7 +263,7 @@ export async function assignRoom(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const reservationId = parsed.data.reservationId || null;
@@ -259,22 +289,22 @@ export async function assignRoom(formData: FormData) {
   ]);
 
   if (!room || activeRoomAssignment) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   if (reservationId) {
     if (!reservation || reservation.roomId !== room.id || room.status !== "RESERVED") {
-      invalidOperation(organizationId);
+      invalidOperation(organizationId, formData);
     }
   } else if (room.status !== "VACANT" || !parsed.data.residentFullName?.trim()) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const residentFullName = reservation?.reserverName ?? parsed.data.residentFullName?.trim();
   const residentPhone = reservation?.reserverPhone ?? parsed.data.residentPhone;
 
   if (!residentFullName) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const loginUsername =
@@ -304,7 +334,7 @@ export async function assignRoom(formData: FormData) {
   ]);
 
   if (existingLoginUser?.status === "ACTIVE" || existingResidentCode) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const supabaseAdmin = createAdminClient();
@@ -326,7 +356,7 @@ export async function assignRoom(formData: FormData) {
     });
 
     if (error) {
-      invalidOperation(organizationId);
+      invalidOperation(organizationId, formData);
     }
   } else {
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -347,7 +377,7 @@ export async function assignRoom(formData: FormData) {
     createdAuthUserId = authUserId;
 
     if (error || !authUserId) {
-      invalidOperation(organizationId);
+      invalidOperation(organizationId, formData);
     }
   }
 
@@ -490,7 +520,7 @@ export async function assignRoom(formData: FormData) {
     }
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function moveOutRoom(formData: FormData) {
@@ -509,7 +539,7 @@ export async function moveOutRoom(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const before = await prisma.roomAssignment.findFirst({
@@ -525,7 +555,7 @@ export async function moveOutRoom(formData: FormData) {
   });
 
   if (!before || before.room.status !== "OCCUPIED") {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   await prisma.$transaction(async (tx) => {
@@ -586,11 +616,11 @@ export async function moveOutRoom(formData: FormData) {
     );
 
     if (error) {
-      invalidOperation(organizationId);
+      invalidOperation(organizationId, formData);
     }
   }
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function reserveRoom(formData: FormData) {
@@ -617,7 +647,7 @@ export async function reserveRoom(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const [room, activeReservation] = await Promise.all([
@@ -635,7 +665,7 @@ export async function reserveRoom(formData: FormData) {
   ]);
 
   if (!room || room.status !== "VACANT" || activeReservation) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   await prisma.$transaction(async (tx) => {
@@ -675,7 +705,7 @@ export async function reserveRoom(formData: FormData) {
     });
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function cancelReservation(formData: FormData) {
@@ -686,7 +716,7 @@ export async function cancelReservation(formData: FormData) {
   const parsed = uuidSchema.safeParse(getString(formData, "reservationId"));
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const reservation = await getReservationInOrganization({
@@ -696,7 +726,7 @@ export async function cancelReservation(formData: FormData) {
   });
 
   if (!reservation || reservation.room.status !== "RESERVED") {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   await prisma.$transaction(async (tx) => {
@@ -732,7 +762,7 @@ export async function cancelReservation(formData: FormData) {
     });
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function markRoomUnavailable(formData: FormData) {
@@ -743,7 +773,7 @@ export async function markRoomUnavailable(formData: FormData) {
   const parsed = uuidSchema.safeParse(getString(formData, "roomId"));
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const room = await getRoomInOrganization({
@@ -753,7 +783,7 @@ export async function markRoomUnavailable(formData: FormData) {
   });
 
   if (!room || room.status !== "VACANT") {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   await prisma.$transaction(async (tx) => {
@@ -777,7 +807,7 @@ export async function markRoomUnavailable(formData: FormData) {
     });
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function createInvoice(formData: FormData) {
@@ -804,7 +834,7 @@ export async function createInvoice(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const assignment = await getAssignmentInOrganization({
@@ -814,7 +844,7 @@ export async function createInvoice(formData: FormData) {
   });
 
   if (!assignment) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const invoice = await prisma.invoice.create({
@@ -839,7 +869,7 @@ export async function createInvoice(formData: FormData) {
     after: invoice
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function recordMeterReading(formData: FormData) {
@@ -864,7 +894,7 @@ export async function recordMeterReading(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const room = await getRoomInOrganization({
@@ -874,7 +904,7 @@ export async function recordMeterReading(formData: FormData) {
   });
 
   if (!room) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const reading = await prisma.meterReading.create({
@@ -897,7 +927,7 @@ export async function recordMeterReading(formData: FormData) {
     after: reading
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function createMaintenanceRequest(formData: FormData) {
@@ -923,7 +953,7 @@ export async function createMaintenanceRequest(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   let roomAssignmentId = parsed.data.roomAssignmentId || null;
@@ -943,7 +973,7 @@ export async function createMaintenanceRequest(formData: FormData) {
     });
 
     if (!ownAssignment) {
-      forbiddenOperation(organizationId);
+      forbiddenOperation(organizationId, formData);
     }
 
     roomAssignmentId = ownAssignment.id;
@@ -956,14 +986,14 @@ export async function createMaintenanceRequest(formData: FormData) {
     });
 
     if (!assignment) {
-      invalidOperation(organizationId);
+      invalidOperation(organizationId, formData);
     }
 
     targetRoomId ??= assignment.roomId;
   }
 
   if (!targetRoomId) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   let previousRoomStatus: "VACANT" | "OCCUPIED" | null = null;
@@ -975,11 +1005,11 @@ export async function createMaintenanceRequest(formData: FormData) {
   });
 
   if (!room) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   if (room.status !== "VACANT" && room.status !== "OCCUPIED") {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   previousRoomStatus = room.status;
@@ -1021,7 +1051,7 @@ export async function createMaintenanceRequest(formData: FormData) {
     });
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }
 
 export async function updateMaintenanceStatus(formData: FormData) {
@@ -1042,7 +1072,7 @@ export async function updateMaintenanceStatus(formData: FormData) {
     });
 
   if (!parsed.success) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const before = await prisma.maintenanceRequest.findFirst({
@@ -1053,14 +1083,14 @@ export async function updateMaintenanceStatus(formData: FormData) {
   });
 
   if (!before) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   if (
     (before.status === "RESOLVED" || before.status === "CANCELLED") &&
     (parsed.data.status === "OPEN" || parsed.data.status === "IN_PROGRESS")
   ) {
-    invalidOperation(organizationId);
+    invalidOperation(organizationId, formData);
   }
 
   const assignedToUserId = parsed.data.assignedToUserId || null;
@@ -1082,7 +1112,7 @@ export async function updateMaintenanceStatus(formData: FormData) {
     });
 
     if (!assignee) {
-      invalidOperation(organizationId);
+      invalidOperation(organizationId, formData);
     }
   }
 
@@ -1147,5 +1177,5 @@ export async function updateMaintenanceStatus(formData: FormData) {
     });
   });
 
-  revalidateOperations(organizationId);
+  revalidateOperations(organizationId, formData);
 }

@@ -3,13 +3,22 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
+  Banknote,
+  BedDouble,
   Building2,
+  CalendarCheck,
+  CalendarX,
   ClipboardList,
+  DoorOpen,
+  Gauge,
   LayoutDashboard,
+  LifeBuoy,
+  LogIn,
   LogOut,
   Menu,
+  ReceiptText,
   ShieldCheck,
   Users,
   Wrench,
@@ -22,9 +31,19 @@ import { cn } from "@/lib/utils";
 
 const sidebarIcons = {
   audit: ClipboardList,
+  banknote: Banknote,
+  bed: BedDouble,
+  calendarCheck: CalendarCheck,
+  calendarX: CalendarX,
   dashboard: LayoutDashboard,
+  doorOpen: DoorOpen,
+  gauge: Gauge,
   iam: ShieldCheck,
+  lifeBuoy: LifeBuoy,
+  logIn: LogIn,
+  logOut: LogOut,
   organizations: Building2,
+  receipt: ReceiptText,
   users: Users,
   wrench: Wrench
 };
@@ -32,9 +51,21 @@ const sidebarIcons = {
 export type SidebarIconName = keyof typeof sidebarIcons;
 
 export type SidebarNavItem = {
+  group?: string;
   href: string;
   icon: SidebarIconName;
   label: string;
+};
+
+type SidebarOrganization = {
+  activeOrganizationId: string;
+  memberships: {
+    organization: {
+      id: string;
+      name: string;
+      status: string;
+    };
+  }[];
 };
 
 type SidebarNavProps = {
@@ -42,6 +73,7 @@ type SidebarNavProps = {
   brandHref: string;
   eyebrow?: string;
   items: SidebarNavItem[];
+  organization?: SidebarOrganization;
   userLabel?: string;
   userMeta?: string;
 };
@@ -51,13 +83,23 @@ export function SidebarNav({
   brandHref,
   eyebrow,
   items,
+  organization,
   userLabel,
   userMeta
 }: SidebarNavProps) {
   const pathname = usePathname() ?? "/";
+  const searchParams = useSearchParams();
+  const requestedOrganizationId = searchParams.get("organizationId") ?? undefined;
+  const activeOrganizationId =
+    organization?.memberships.some(
+      (membership) => membership.organization.id === requestedOrganizationId
+    )
+      ? requestedOrganizationId
+      : organization?.activeOrganizationId;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileRendered, setMobileRendered] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desktopSidebarRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? "hidden" : "";
@@ -91,6 +133,17 @@ export function SidebarNav({
     closeTimerRef.current = setTimeout(() => {
       setMobileRendered(false);
     }, 220);
+  }
+
+  function blurActiveSidebarControl() {
+    const activeElement = document.activeElement;
+
+    if (
+      activeElement instanceof HTMLElement &&
+      desktopSidebarRef.current?.contains(activeElement)
+    ) {
+      activeElement.blur();
+    }
   }
 
   return (
@@ -144,6 +197,8 @@ export function SidebarNav({
               expanded
               items={items}
               onNavigate={closeMobileNav}
+              organization={organization}
+              activeOrganizationId={activeOrganizationId}
               pathname={pathname}
               userLabel={userLabel}
               userMeta={userMeta}
@@ -163,12 +218,18 @@ export function SidebarNav({
         </div>
       ) : null}
 
-      <aside className="group fixed inset-y-0 left-0 z-30 hidden w-[4.75rem] flex-col border-r bg-card shadow-sm transition-[width] duration-200 ease-out hover:w-64 lg:flex">
+      <aside
+        ref={desktopSidebarRef}
+        onMouseLeave={blurActiveSidebarControl}
+        className="group fixed inset-y-0 left-0 z-30 hidden w-[4.75rem] flex-col border-r bg-card shadow-sm transition-[width] duration-200 ease-out hover:w-64 lg:flex"
+      >
         <SidebarContent
           ariaLabel={ariaLabel}
           brandHref={brandHref}
           eyebrow={eyebrow}
           items={items}
+          organization={organization}
+          activeOrganizationId={activeOrganizationId}
           pathname={pathname}
           userLabel={userLabel}
           userMeta={userMeta}
@@ -179,6 +240,7 @@ export function SidebarNav({
 }
 
 type SidebarContentProps = SidebarNavProps & {
+  activeOrganizationId?: string;
   expanded?: boolean;
   onNavigate?: () => void;
   pathname: string;
@@ -192,13 +254,15 @@ function SidebarContent({
   expanded = false,
   items,
   onNavigate,
+  organization,
+  activeOrganizationId,
   pathname,
   trailingAction,
   userLabel,
   userMeta
 }: SidebarContentProps) {
   return (
-    <div className="flex h-full flex-col overflow-hidden px-3 py-4">
+    <div className="flex h-full flex-col overflow-hidden overflow-x-hidden px-3 py-4">
       <div className="flex h-12 items-center gap-2">
         <Link
           href={brandHref}
@@ -243,16 +307,53 @@ function SidebarContent({
         <div className="mt-3 h-6" />
       )}
 
-      <nav aria-label={ariaLabel} className="mt-3 grid gap-2">
-        {items.map((item) => (
-          <SidebarLink
-            key={item.href}
-            expanded={expanded}
-            isActive={isItemActive(pathname, item.href)}
-            item={item}
-            onNavigate={onNavigate}
-          />
-        ))}
+      {organization && activeOrganizationId ? (
+        <SidebarOrganizationSwitcher
+          activeOrganizationId={activeOrganizationId}
+          expanded={expanded}
+          memberships={organization.memberships}
+          pathname={pathname}
+        />
+      ) : null}
+
+      <nav
+        aria-label={ariaLabel}
+        className="mt-3 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden pr-1"
+      >
+        {items.map((item, index) => {
+          const previousGroup = items[index - 1]?.group;
+          const showGroup = item.group && item.group !== previousGroup;
+
+          return (
+            <div
+              key={item.href}
+              className={cn(
+                "min-w-0 shrink-0",
+                showGroup ? "mt-2 first:mt-0" : undefined
+              )}
+            >
+              {showGroup ? (
+                <p
+                  className={cn(
+                    "mb-1 h-5 truncate px-3 text-xs font-semibold uppercase text-muted-foreground transition-opacity duration-150",
+                    expanded
+                      ? "opacity-100"
+                      : "opacity-0 group-hover:opacity-100"
+                  )}
+                >
+                  {item.group}
+                </p>
+              ) : null}
+              <SidebarLink
+                activeOrganizationId={activeOrganizationId}
+                expanded={expanded}
+                isActive={isItemActive(pathname, item.href)}
+                item={item}
+                onNavigate={onNavigate}
+              />
+            </div>
+          );
+        })}
       </nav>
 
       <div className="mt-auto grid gap-3 border-t pt-3">
@@ -304,11 +405,13 @@ function SidebarContent({
 }
 
 function SidebarLink({
+  activeOrganizationId,
   expanded,
   isActive,
   item,
   onNavigate
 }: {
+  activeOrganizationId?: string;
   expanded: boolean;
   isActive: boolean;
   item: SidebarNavItem;
@@ -318,7 +421,7 @@ function SidebarLink({
 
   return (
     <Link
-      href={item.href}
+      href={withOrganization(item.href, activeOrganizationId)}
       onClick={onNavigate}
       aria-current={isActive ? "page" : undefined}
       className={cn(
@@ -342,6 +445,76 @@ function SidebarLink({
   );
 }
 
+function SidebarOrganizationSwitcher({
+  activeOrganizationId,
+  expanded,
+  memberships,
+  pathname
+}: {
+  activeOrganizationId: string;
+  expanded: boolean;
+  memberships: SidebarOrganization["memberships"];
+  pathname: string;
+}) {
+  return (
+    <form
+      method="get"
+      action={organizationSwitcherAction(pathname)}
+      className="mt-2 flex min-w-0 items-end gap-2"
+    >
+      <label
+        className={cn(
+          "grid min-w-0 flex-1 gap-1 text-xs font-medium text-muted-foreground transition-opacity duration-150",
+          expanded
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+        )}
+      >
+        <span
+          className={cn(
+            "truncate transition-opacity duration-150",
+            expanded
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          Organization
+        </span>
+        <select
+          name="organizationId"
+          defaultValue={activeOrganizationId}
+          aria-label="Organization"
+          className="h-10 w-full min-w-0 rounded-md border bg-card px-2 text-sm text-foreground outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {memberships.map((membership) => (
+            <option
+              key={membership.organization.id}
+              value={membership.organization.id}
+            >
+              {membership.organization.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="icon"
+        className={cn(
+          "size-10 shrink-0 overflow-hidden transition-opacity duration-150",
+          expanded
+            ? "pointer-events-auto opacity-100"
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+        )}
+        title="Switch organization"
+      >
+        <Building2 className="size-4 shrink-0" aria-hidden="true" />
+        <span className="sr-only">Switch organization</span>
+      </Button>
+    </form>
+  );
+}
+
 function isItemActive(pathname: string, href: string) {
   const itemPathname = getPathname(href);
 
@@ -354,4 +527,22 @@ function isItemActive(pathname: string, href: string) {
 
 function getPathname(href: string) {
   return new URL(href, "http://double-daeng.local").pathname;
+}
+
+function withOrganization(href: string, organizationId?: string) {
+  if (!organizationId || !href.startsWith("/app")) {
+    return href;
+  }
+
+  const url = new URL(href, "http://double-daeng.local");
+  url.searchParams.set("organizationId", organizationId);
+  return `${url.pathname}?${url.searchParams.toString()}`;
+}
+
+function organizationSwitcherAction(pathname: string) {
+  if (pathname.startsWith("/app/rooms/")) {
+    return "/app/rooms";
+  }
+
+  return pathname.startsWith("/app") ? pathname : "/app";
 }

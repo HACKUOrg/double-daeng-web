@@ -10,7 +10,6 @@ import {
   Users,
   Wrench
 } from "lucide-react";
-import { OrganizationSwitcher } from "@/app/app/_components/organization-switcher";
 import { Button } from "@/components/ui/button";
 import { resolveActiveOrganization } from "@/lib/auth/organization-scope";
 import { requirePermission } from "@/lib/auth/session";
@@ -66,7 +65,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
   const profile = await requirePermission("app.access");
   const role = profile.role as Exclude<Role, "SA">;
   const query = await searchParams;
-  const { activeMemberships, activeOrganization } = resolveActiveOrganization(
+  const { activeOrganization } = resolveActiveOrganization(
     profile,
     query.organizationId
   );
@@ -109,11 +108,10 @@ export default async function AppPage({ searchParams }: AppPageProps) {
               <Building2 className="size-4 text-primary" aria-hidden="true" />
               <h2 className="text-base font-semibold">Active organization</h2>
             </div>
-            <OrganizationSwitcher
-              activeOrganizationId={activeOrganization.id}
-              action="/app"
-              memberships={activeMemberships}
-            />
+            <p className="text-lg font-semibold">{activeOrganization.name}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Use the sidebar organization control to switch workspaces.
+            </p>
             <div className="mt-4 flex flex-wrap gap-2">
               {copy.focus.map((item) => (
                 <span
@@ -150,6 +148,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
           </section>
 
           <RoleWorkspace
+            organizationId={activeOrganization.id}
             organizationName={activeOrganization.name}
             role={role}
             dashboard={dashboard}
@@ -275,10 +274,12 @@ function Metric({
 
 function RoleWorkspace({
   dashboard,
+  organizationId,
   organizationName,
   role
 }: {
   dashboard: Awaited<ReturnType<typeof getOrganizationDashboard>>;
+  organizationId: string;
   organizationName: string;
   role: Exclude<Role, "SA">;
 }) {
@@ -347,9 +348,9 @@ function RoleWorkspace({
         }
       >
         <Button asChild variant="outline">
-          <Link href="/app/operations">
+          <Link href={`/app/rooms?organizationId=${organizationId}`}>
             <Wrench className="size-4" aria-hidden="true" />
-            Open operations
+            Open rooms
           </Link>
         </Button>
       </WorkspacePanel>

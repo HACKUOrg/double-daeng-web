@@ -427,39 +427,51 @@ async function assertRoomLoginSuspended(client, username) {
 }
 
 async function assertManagerPage(cookies) {
-  const { response, html } = await fetchAuthed(
-    `/app/operations?organizationId=${ids.organization}`,
-    cookies
-  );
-
-  if (!response.ok) {
-    throw new Error(`/app/operations returned ${response.status}`);
-  }
-
-  for (const expected of [
-    "Core operations",
-    "Move-in",
-    "Reserve room",
-    "Reservations",
-    "Monthly invoice",
-    "Meter reading",
-    "Mark unavailable",
-    "Maintenance",
-    fixture.organization
-  ]) {
-    if (!html.includes(expected)) {
-      throw new Error(`/app/operations manager page missing ${expected}`);
+  const pages = [
+    {
+      path: `/app/rooms?organizationId=${ids.organization}`,
+      expected: ["Room overview", "801", "802", fixture.asset]
+    },
+    {
+      path: `/app/operations/move-in?organizationId=${ids.organization}`,
+      expected: ["Move-in", "New resident stay", "Assign room"]
+    },
+    {
+      path: `/app/operations/reserve-room?organizationId=${ids.organization}`,
+      expected: ["Reserve room", "New reservation", "Active reservations"]
+    },
+    {
+      path: `/app/operations/monthly-invoice?organizationId=${ids.organization}`,
+      expected: ["Monthly invoice", "Create invoice", "Recent invoices"]
+    },
+    {
+      path: `/app/operations/mark-unavailable?organizationId=${ids.organization}`,
+      expected: ["Mark unavailable", "Take room out of service"]
     }
-  }
+  ];
 
-  if (html.includes(fixture.outsideOrganization) || html.includes(fixture.outsideAsset)) {
-    throw new Error("/app/operations leaked outside organization data.");
+  for (const page of pages) {
+    const { response, html } = await fetchAuthed(page.path, cookies);
+
+    if (!response.ok) {
+      throw new Error(`${page.path} returned ${response.status}`);
+    }
+
+    for (const expected of page.expected) {
+      if (!html.includes(expected)) {
+        throw new Error(`${page.path} missing ${expected}`);
+      }
+    }
+
+    if (html.includes(fixture.outsideOrganization) || html.includes(fixture.outsideAsset)) {
+      throw new Error(`${page.path} leaked outside organization data.`);
+    }
   }
 }
 
 async function assertBlockedOutsideScope(cookies) {
   const { response } = await fetchAuthed(
-    `/app/operations?organizationId=${ids.outsideOrganization}`,
+    `/app/rooms?organizationId=${ids.outsideOrganization}`,
     cookies,
     "manual"
   );
@@ -473,41 +485,76 @@ async function assertBlockedOutsideScope(cookies) {
 }
 
 async function assertFinalPages({ managerCookies, residentCookies }) {
-  const manager = await fetchAuthed(
-    `/app/operations?organizationId=${ids.organization}`,
-    managerCookies
-  );
+  const [rooms, roomDetail, invoices, meters, maintenance] = await Promise.all([
+    fetchAuthed(`/app/rooms?organizationId=${ids.organization}`, managerCookies),
+    fetchAuthed(
+      `/app/rooms/${ids.roomOne}?organizationId=${ids.organization}`,
+      managerCookies
+    ),
+    fetchAuthed(
+      `/app/operations/monthly-invoice?organizationId=${ids.organization}`,
+      managerCookies
+    ),
+    fetchAuthed(
+      `/app/operations/meter-reading?organizationId=${ids.organization}`,
+      managerCookies
+    ),
+    fetchAuthed(
+      `/app/operations/maintenance?organizationId=${ids.organization}`,
+      managerCookies
+    )
+  ]);
+  const managerHtml = [
+    rooms.html,
+    roomDetail.html,
+    invoices.html,
+    meters.html,
+    maintenance.html
+  ].join("\n");
 
   for (const expected of [
+    "Room overview",
+    `Room 801`,
     fixture.residentFullName,
     fixture.contractNumber,
     fixture.invoiceNumber,
     fixture.maintenanceTitle,
-    "RESOLVED",
+    "Resolved",
     "Water 123.45"
   ]) {
-    if (!manager.html.includes(expected)) {
+    if (!managerHtml.includes(expected)) {
       throw new Error(`Manager final page missing ${expected}`);
     }
   }
 
-  const resident = await fetchAuthed(
-    `/app/operations?organizationId=${ids.organization}`,
-    residentCookies
-  );
+  const [residentMaintenance, residentRooms, residentMoveIn] = await Promise.all([
+    fetchAuthed(
+      `/app/operations/maintenance?organizationId=${ids.organization}`,
+      residentCookies
+    ),
+    fetchAuthed(`/app/rooms?organizationId=${ids.organization}`, residentCookies),
+    fetchAuthed(
+      `/app/operations/move-in?organizationId=${ids.organization}`,
+      residentCookies
+    )
+  ]);
+  const residentHtml = [residentMaintenance.html, residentRooms.html].join("\n");
 
   for (const expected of [
     "My active stay",
     fixture.residentFullName,
-    fixture.invoiceNumber,
+    "Room overview",
     fixture.maintenanceTitle
   ]) {
-    if (!resident.html.includes(expected)) {
+    if (!residentHtml.includes(expected)) {
       throw new Error(`Resident final page missing ${expected}`);
     }
   }
 
-  if (resident.html.includes("Move-in") || resident.html.includes("Monthly invoice")) {
+  if (
+    residentHtml.includes("Monthly invoice") ||
+    residentMoveIn.html.includes("Assign room")
+  ) {
     throw new Error("Resident page exposed staff operation forms.");
   }
 }
@@ -557,12 +604,18 @@ try {
     login(fixture.managerEmail, fixture.managerPassword),
     login(fixture.operationEmail, fixture.operationPassword)
   ]);
-  const operationsPath = `/app/operations?organizationId=${ids.organization}`;
+  const moveInPath = `/app/operations/move-in?organizationId=${ids.organization}`;
+  const moveOutPath = `/app/operations/move-out?organizationId=${ids.organization}`;
+  const reservePath = `/app/operations/reserve-room?organizationId=${ids.organization}`;
+  const invoicePath = `/app/operations/monthly-invoice?organizationId=${ids.organization}`;
+  const meterPath = `/app/operations/meter-reading?organizationId=${ids.organization}`;
+  const unavailablePath = `/app/operations/mark-unavailable?organizationId=${ids.organization}`;
+  const maintenancePath = `/app/operations/maintenance?organizationId=${ids.organization}`;
 
   await assertManagerPage(managerCookies);
   await assertBlockedOutsideScope(managerCookies);
 
-  await postAction(operationsPath, managerCookies, 'name="reservedDate"', {
+  await postAction(reservePath, managerCookies, 'name="reservedDate"', {
     organizationId: ids.organization,
     roomId: ids.roomTwo,
     reserverName: `Cancel Reservation ${suffix}`,
@@ -574,13 +627,13 @@ try {
   const cancelledReservationId = await getReservationId(client, ids.roomTwo);
   await assertRoomStatus(client, ids.roomTwo, "RESERVED");
 
-  await postAction(operationsPath, managerCookies, "Cancel reservation", {
+  await postAction(reservePath, managerCookies, "Cancel reservation", {
     organizationId: ids.organization,
     reservationId: cancelledReservationId
   });
   await assertRoomStatus(client, ids.roomTwo, "VACANT");
 
-  await postAction(operationsPath, managerCookies, 'name="reservedDate"', {
+  await postAction(reservePath, managerCookies, 'name="reservedDate"', {
     organizationId: ids.organization,
     roomId: ids.roomThree,
     reserverName: fixture.reservationName,
@@ -592,7 +645,7 @@ try {
   const convertedReservationId = await getReservationId(client, ids.roomThree);
   await assertRoomStatus(client, ids.roomThree, "RESERVED");
 
-  await postAction(operationsPath, managerCookies, convertedReservationId, {
+  await postAction(reservePath, managerCookies, convertedReservationId, {
     organizationId: ids.organization,
     reservationId: convertedReservationId,
     roomId: ids.roomThree,
@@ -603,13 +656,13 @@ try {
   });
   await assertRoomStatus(client, ids.roomThree, "OCCUPIED");
 
-  await postAction(operationsPath, managerCookies, "Mark unavailable", {
+  await postAction(unavailablePath, managerCookies, "Mark unavailable", {
     organizationId: ids.organization,
     roomId: ids.roomFour
   });
   await assertRoomStatus(client, ids.roomFour, "UNAVAILABLE");
 
-  await postAction(operationsPath, managerCookies, 'name="moveInDate"', {
+  await postAction(moveInPath, managerCookies, 'name="moveInDate"', {
     organizationId: ids.organization,
     roomId: ids.roomOne,
     residentFullName: fixture.residentFullName,
@@ -625,7 +678,7 @@ try {
     fixture.residentPassword
   );
 
-  await postAction(operationsPath, managerCookies, 'name="invoiceNumber"', {
+  await postAction(invoicePath, managerCookies, 'name="invoiceNumber"', {
     organizationId: ids.organization,
     roomAssignmentId: assignmentId,
     invoiceNumber: fixture.invoiceNumber,
@@ -635,7 +688,7 @@ try {
     status: "ISSUED"
   });
 
-  await postAction(operationsPath, operationCookies, 'name="readingValue"', {
+  await postAction(meterPath, operationCookies, 'name="readingValue"', {
     organizationId: ids.organization,
     roomId: ids.roomOne,
     meterType: "WATER",
@@ -644,7 +697,7 @@ try {
     note: "Phase 8 verify"
   });
 
-  await postAction(operationsPath, residentCookies, 'Send request', {
+  await postAction(maintenancePath, residentCookies, 'Send request', {
     organizationId: ids.organization,
     roomId: ids.roomOne,
     title: fixture.maintenanceTitle,
@@ -654,7 +707,7 @@ try {
   const maintenanceRequestId = await getMaintenanceRequestId(client);
   await assertRoomStatus(client, ids.roomOne, "MAINTENANCE");
 
-  await postAction(operationsPath, operationCookies, maintenanceRequestId, {
+  await postAction(maintenancePath, operationCookies, maintenanceRequestId, {
     organizationId: ids.organization,
     requestId: maintenanceRequestId,
     status: "RESOLVED",
@@ -665,7 +718,7 @@ try {
   await assertFinalPages({ managerCookies, residentCookies });
   await assertDatabaseState(client);
 
-  await postAction(operationsPath, managerCookies, "Move out", {
+  await postAction(moveOutPath, managerCookies, "Move out", {
     organizationId: ids.organization,
     assignmentId,
     moveOutDate: "2026-10-08"
