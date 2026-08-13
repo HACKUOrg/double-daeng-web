@@ -15,6 +15,7 @@
     "verify:auth-smoke": "node scripts/verify-auth-smoke.mjs",
     "verify:admin-login": "node scripts/verify-admin-login.mjs",
     "verify:admin-phase2": "node scripts/verify-admin-phase2.mjs",
+    "verify:admin-organizations-ui": "node scripts/verify-admin-organizations-ui.mjs",
     "verify:phase2-audit": "node scripts/verify-phase2-audit.mjs",
     "verify:phase2-cleanup": "node scripts/verify-phase2-cleanup.mjs",
     "verify:phase3-memberships": "node scripts/verify-phase3-memberships.mjs",
