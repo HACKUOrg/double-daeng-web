@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
+import { createPortal } from "react-dom";
 import {
   ArrowLeft,
   Building,
@@ -1089,8 +1090,13 @@ function DeleteMenu({
   const [isOpen, setIsOpen] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPortalRef = useRef<HTMLDivElement>(null);
   const menuItemRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -1098,7 +1104,11 @@ function DeleteMenu({
     }
 
     function handlePointerDown(event: PointerEvent) {
-      if (event.target instanceof Node && menuRef.current?.contains(event.target)) {
+      if (
+        event.target instanceof Node &&
+        (menuRef.current?.contains(event.target) ||
+          menuPortalRef.current?.contains(event.target))
+      ) {
         return;
       }
 
@@ -1119,6 +1129,40 @@ function DeleteMenu({
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function updateMenuPosition() {
+      const trigger = triggerRef.current;
+      if (!trigger) {
+        return;
+      }
+
+      const rect = trigger.getBoundingClientRect();
+      const menuWidth = 192;
+      const menuHeight = 104;
+      const maxLeft = Math.max(8, window.innerWidth - menuWidth - 8);
+      const left = Math.min(Math.max(8, rect.right - menuWidth), maxLeft);
+      const top =
+        rect.bottom + 8 + menuHeight <= window.innerHeight
+          ? rect.bottom + 8
+          : Math.max(8, rect.top - menuHeight - 8);
+
+      setMenuPosition({ top, left });
+    }
+
+    updateMenuPosition();
+    window.addEventListener("resize", updateMenuPosition);
+    window.addEventListener("scroll", updateMenuPosition, true);
+
+    return () => {
+      window.removeEventListener("resize", updateMenuPosition);
+      window.removeEventListener("scroll", updateMenuPosition, true);
     };
   }, [isOpen]);
 
@@ -1168,34 +1212,39 @@ function DeleteMenu({
       >
         <MoreHorizontal className="size-5" aria-hidden="true" />
       </button>
-      {isOpen ? (
-        <div
-          className="absolute right-0 top-full z-50 mt-2 min-w-48 rounded-md border bg-popover p-1 shadow-lg"
-          role="menu"
-          aria-label={`Actions for ${entityLabel}`}
-        >
-          <button
-            ref={menuItemRef}
-            type="button"
-            role="menuitem"
-            className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm font-medium outline-none transition-colors hover:bg-secondary focus-visible:bg-secondary"
-            onClick={handleDuplicate}
-          >
-            <Copy className="size-4" aria-hidden="true" />
-            Duplicate
-          </button>
-          <div className="my-1 h-px bg-border" role="separator" />
-          <button
-            type="button"
-            role="menuitem"
-            className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm font-medium text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:bg-destructive/10"
-            onClick={handleRemove}
-          >
-            <Trash2 className="size-4" aria-hidden="true" />
-            Remove from draft
-          </button>
-        </div>
-      ) : null}
+      {isOpen && menuPosition && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={menuPortalRef}
+              className="fixed z-[100] w-48 rounded-md border bg-popover p-1 shadow-lg"
+              style={{ top: menuPosition.top, left: menuPosition.left }}
+              role="menu"
+              aria-label={`Actions for ${entityLabel}`}
+            >
+              <button
+                ref={menuItemRef}
+                type="button"
+                role="menuitem"
+                className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm font-medium outline-none transition-colors hover:bg-secondary focus-visible:bg-secondary"
+                onClick={handleDuplicate}
+              >
+                <Copy className="size-4" aria-hidden="true" />
+                Duplicate
+              </button>
+              <div className="my-1 h-px bg-border" role="separator" />
+              <button
+                type="button"
+                role="menuitem"
+                className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm font-medium text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:bg-destructive/10"
+                onClick={handleRemove}
+              >
+                <Trash2 className="size-4" aria-hidden="true" />
+                Remove from draft
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
       {confirmationMessage ? (
         <ConfirmationDialog
           open={isConfirmOpen}
@@ -1263,6 +1312,11 @@ function ConfirmationDialog({
   return (
     <dialog
       ref={dialogRef}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          event.currentTarget.close();
+        }
+      }}
       className="organization-confirm-dialog w-[calc(100%-2rem)] max-w-md rounded-lg border bg-card p-0 text-card-foreground shadow-2xl outline-none"
       aria-labelledby={titleId}
       aria-describedby={descriptionId}

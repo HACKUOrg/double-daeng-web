@@ -74,16 +74,8 @@ body {
 }
 
 .organization-confirm-dialog::backdrop {
-  background: rgb(15 23 42 / 0);
-  transition:
-    background 180ms ease,
-    display 180ms ease allow-discrete,
-    overlay 180ms ease allow-discrete;
-  transition-behavior: allow-discrete;
-}
-
-.organization-confirm-dialog[open]::backdrop {
-  background: rgb(15 23 42 / 0.45);
+  background-color: rgb(15 23 42 / 0.45);
+  animation: organization-dialog-backdrop-in 180ms ease-out both;
 }
 
 @starting-style {
@@ -92,8 +84,15 @@ body {
     transform: translateY(8px) scale(0.98);
   }
 
-  .organization-confirm-dialog[open]::backdrop {
-    background: rgb(15 23 42 / 0);
+}
+
+@keyframes organization-dialog-backdrop-in {
+  from {
+    background-color: rgb(15 23 42 / 0);
+  }
+
+  to {
+    background-color: rgb(15 23 42 / 0.45);
   }
 }
 
@@ -101,5 +100,6 @@ body {
   .organization-confirm-dialog,
   .organization-confirm-dialog::backdrop {
     transition: none;
+    animation: none;
   }
 }

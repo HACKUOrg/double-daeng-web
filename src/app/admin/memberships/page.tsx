@@ -1,5 +1,4 @@
-import { Link2, Trash2, UserPlus, Users } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { UserPlus, Users } from "lucide-react";
 import { getPrisma } from "@/lib/prisma";
 import { roleLabels } from "@/lib/rbac";
 import { requirePermission } from "@/lib/auth/session";
@@ -7,6 +6,8 @@ import {
   assignOrganizationMembership,
   removeOrganizationMembership
 } from "./actions";
+import { MembershipAssignmentForm } from "./_components/membership-assignment-form";
+import { MembershipGroupAccordion } from "./_components/membership-group-accordion";
 
 type MembershipsPageProps = {
   searchParams: Promise<{
@@ -33,7 +34,8 @@ export default async function MembershipsPage({
       orderBy: [{ role: "asc" }, { email: "asc" }]
     }),
     prisma.organization.findMany({
-      orderBy: [{ status: "asc" }, { name: "asc" }]
+      where: { status: "ACTIVE" },
+      orderBy: { name: "asc" }
     }),
     prisma.organizationMembership.findMany({
       include: {
@@ -46,6 +48,7 @@ export default async function MembershipsPage({
       ]
     })
   ]);
+  const membershipGroups = groupMembershipsByUser(memberships);
 
   return (
     <div className="grid gap-6">
@@ -60,10 +63,6 @@ export default async function MembershipsPage({
             works inside the right tenant boundary.
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2 text-sm md:min-w-56">
-          <Metric label="Users" value={users.length} />
-          <Metric label="Memberships" value={memberships.length} />
-        </div>
       </section>
 
       <StatusBanner params={params} />
@@ -74,86 +73,45 @@ export default async function MembershipsPage({
           <h2 className="text-base font-semibold">Assign membership</h2>
         </div>
         {users.length && organizations.length ? (
-          <form
+          <MembershipAssignmentForm
             action={assignOrganizationMembership}
-            className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"
-          >
-            <label className="grid gap-2 text-sm font-medium">
-              User
-              <select
-                name="userId"
-                required
-                className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {users.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.email} - {roleLabels[user.role]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-2 text-sm font-medium">
-              Organization
-              <select
-                name="organizationId"
-                required
-                className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {organizations.map((organization) => (
-                  <option key={organization.id} value={organization.id}>
-                    {organization.name} - {organization.status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button type="submit" className="self-end">
-              <Link2 className="size-4" aria-hidden="true" />
-              Assign
-            </Button>
-          </form>
+            users={users.map((user) => ({
+              id: user.id,
+              email: user.email,
+              role: user.role
+            }))}
+            organizations={organizations}
+            memberships={memberships.map(({ userId, organizationId }) => ({
+              userId,
+              organizationId
+            }))}
+          />
         ) : (
           <p className="rounded-md border border-dashed px-4 py-3 text-sm text-muted-foreground">
-            No non-SA user profiles are available for assignment yet.
+            {users.length
+              ? "No active organizations are available for assignment yet."
+              : "No non-SA user profiles are available for assignment yet."}
           </p>
         )}
       </section>
 
       <section className="overflow-hidden rounded-lg border bg-card">
         <div className="border-b px-5 py-4">
-          <h2 className="text-base font-semibold">Assigned memberships</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold">Assigned memberships</h2>
+            <span className="rounded-full border bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">
+              {memberships.length} memberships
+            </span>
+          </div>
         </div>
-        {memberships.length ? (
+        {membershipGroups.length ? (
           <div className="divide-y">
-            {memberships.map((membership) => (
-              <article
-                key={membership.id}
-                className="grid gap-4 p-5 md:grid-cols-[1fr_auto]"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Users className="size-4 text-primary" aria-hidden="true" />
-                    <h3 className="font-semibold">{membership.user.email}</h3>
-                    <span className="rounded-full border bg-secondary px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                      {roleLabels[membership.user.role]}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {membership.organization.name} -{" "}
-                    {membership.organization.status}
-                  </p>
-                </div>
-                <form action={removeOrganizationMembership} className="self-start">
-                  <input
-                    type="hidden"
-                    name="membershipId"
-                    value={membership.id}
-                  />
-                  <Button type="submit" variant="destructive" size="sm">
-                    <Trash2 className="size-4" aria-hidden="true" />
-                    Remove
-                  </Button>
-                </form>
-              </article>
+            {membershipGroups.map((group) => (
+              <MembershipGroupAccordion
+                key={group.user.id}
+                action={removeOrganizationMembership}
+                group={group}
+              />
             ))}
           </div>
         ) : (
@@ -170,13 +128,42 @@ export default async function MembershipsPage({
   );
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border bg-card px-4 py-3">
-      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
-    </div>
-  );
+function groupMembershipsByUser(
+  memberships: Array<{
+    id: string;
+    organization: { name: string; status: string };
+    user: { id: string; email: string; role: keyof typeof roleLabels };
+  }>
+) {
+  const groups = new Map<
+    string,
+    {
+      user: (typeof memberships)[number]["user"];
+      memberships: Array<(typeof memberships)[number]>;
+    }
+  >();
+
+  for (const membership of memberships) {
+    const existing = groups.get(membership.user.id);
+    if (existing) {
+      existing.memberships.push(membership);
+      continue;
+    }
+
+    groups.set(membership.user.id, {
+      user: membership.user,
+      memberships: [membership]
+    });
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      memberships: [...group.memberships].sort((left, right) =>
+        left.organization.name.localeCompare(right.organization.name)
+      )
+    }))
+    .sort((left, right) => left.user.email.localeCompare(right.user.email));
 }
 
 function StatusBanner({
