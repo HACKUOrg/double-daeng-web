@@ -1,14 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import {
   ArrowLeft,
   Building,
+  ChevronDown,
+  Copy,
   DoorOpen,
   Home,
   Layers3,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Save,
@@ -59,7 +62,6 @@ export function OrganizationStructureEditor({
   );
   const serializedDraft = useMemo(() => JSON.stringify(draft), [draft]);
   const isDirty = serializedDraft !== serializedInitialDraft;
-  const stats = getStats(draft);
   const isCreate = draft.mode === "create";
 
   function updateDraft(mutator: (next: OrganizationStructureDraft) => void) {
@@ -143,6 +145,102 @@ export function OrganizationStructureEditor({
         rentAmount: "0.00",
         depositAmount: "0.00",
         status: "VACANT"
+      });
+    });
+  }
+
+  function duplicateAsset(assetClientId: string) {
+    updateDraft((next) => {
+      const source = findAsset(next, assetClientId);
+      if (!source) {
+        return;
+      }
+
+      next.assets.push({
+        clientId: nextClientId("asset"),
+        name: nextCopyName(
+          source.name,
+          next.assets.map((asset) => asset.name)
+        ),
+        abbreviation: nextAssetAbbreviation(next.assets, next.assets.length + 1),
+        type: source.type,
+        status: source.status,
+        buildings: source.buildings.map((building) =>
+          duplicateBuildingDraft(building, nextClientId)
+        )
+      });
+    });
+  }
+
+  function duplicateBuilding(
+    assetClientId: string,
+    buildingClientId: string
+  ) {
+    updateDraft((next) => {
+      const asset = findAsset(next, assetClientId);
+      const source = asset?.buildings.find(
+        (building) => building.clientId === buildingClientId
+      );
+      if (!asset || !source) {
+        return;
+      }
+
+      asset.buildings.push({
+        ...duplicateBuildingDraft(source, nextClientId),
+        name: nextCopyName(
+          source.name,
+          asset.buildings.map((building) => building.name)
+        )
+      });
+    });
+  }
+
+  function duplicateFloor(
+    assetClientId: string,
+    buildingClientId: string,
+    floorClientId: string
+  ) {
+    updateDraft((next) => {
+      const building = findBuilding(next, assetClientId, buildingClientId);
+      const source = building?.floors.find(
+        (floor) => floor.clientId === floorClientId
+      );
+      if (!building || !source) {
+        return;
+      }
+
+      building.floors.push({
+        ...duplicateFloorDraft(source, nextClientId),
+        name: nextCopyName(
+          source.name,
+          building.floors.map((floor) => floor.name)
+        ),
+        number: nextFloorNumber(building.floors)
+      });
+    });
+  }
+
+  function duplicateRoom(
+    assetClientId: string,
+    buildingClientId: string,
+    floorClientId: string,
+    roomClientId: string
+  ) {
+    updateDraft((next) => {
+      const floor = findFloor(
+        next,
+        assetClientId,
+        buildingClientId,
+        floorClientId
+      );
+      const source = floor?.rooms.find((room) => room.clientId === roomClientId);
+      if (!floor || !source) {
+        return;
+      }
+
+      floor.rooms.push({
+        ...duplicateRoomDraft(source, nextClientId),
+        roomNumber: nextRoomNumber(floor)
       });
     });
   }
@@ -242,12 +340,6 @@ export function OrganizationStructureEditor({
               Save once when the structure is ready.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-            <Metric label="Assets" value={stats.assets} />
-            <Metric label="Buildings" value={stats.buildings} />
-            <Metric label="Floors" value={stats.floors} />
-            <Metric label="Rooms" value={stats.rooms} />
-          </div>
         </div>
       </section>
 
@@ -324,6 +416,7 @@ export function OrganizationStructureEditor({
             <AssetEditor
               key={asset.clientId}
               asset={asset}
+              onDuplicate={() => duplicateAsset(asset.clientId)}
               onAddBuilding={() => addBuilding(asset.clientId)}
               onAddFloor={(buildingClientId) =>
                 addFloor(asset.clientId, buildingClientId)
@@ -332,6 +425,20 @@ export function OrganizationStructureEditor({
                 addRoom(asset.clientId, buildingClientId, floorClientId)
               }
               onRemove={() => removeAsset(asset.clientId)}
+              onDuplicateBuilding={(buildingClientId) =>
+                duplicateBuilding(asset.clientId, buildingClientId)
+              }
+              onDuplicateFloor={(buildingClientId, floorClientId) =>
+                duplicateFloor(asset.clientId, buildingClientId, floorClientId)
+              }
+              onDuplicateRoom={(buildingClientId, floorClientId, roomClientId) =>
+                duplicateRoom(
+                  asset.clientId,
+                  buildingClientId,
+                  floorClientId,
+                  roomClientId
+                )
+              }
               onRemoveBuilding={(buildingClientId) =>
                 removeBuilding(asset.clientId, buildingClientId)
               }
@@ -382,20 +489,32 @@ export function OrganizationStructureEditor({
 
 function AssetEditor({
   asset,
+  onDuplicate,
   onAddBuilding,
   onAddFloor,
   onAddRoom,
   onRemove,
+  onDuplicateBuilding,
+  onDuplicateFloor,
+  onDuplicateRoom,
   onRemoveBuilding,
   onRemoveFloor,
   onRemoveRoom,
   updateDraft
 }: {
   asset: AssetDraft;
+  onDuplicate: () => void;
   onAddBuilding: () => void;
   onAddFloor: (buildingClientId: string) => void;
   onAddRoom: (buildingClientId: string, floorClientId: string) => void;
   onRemove: () => void;
+  onDuplicateBuilding: (buildingClientId: string) => void;
+  onDuplicateFloor: (buildingClientId: string, floorClientId: string) => void;
+  onDuplicateRoom: (
+    buildingClientId: string,
+    floorClientId: string,
+    roomClientId: string
+  ) => void;
   onRemoveBuilding: (buildingClientId: string) => void;
   onRemoveFloor: (buildingClientId: string, floorClientId: string) => void;
   onRemoveRoom: (
@@ -405,134 +524,185 @@ function AssetEditor({
   ) => void;
   updateDraft: (mutator: (next: OrganizationStructureDraft) => void) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(() => !asset.persistedId);
+  const floorCount = asset.buildings.reduce(
+    (count, building) => count + building.floors.length,
+    0
+  );
+  const roomCount = asset.buildings.reduce(
+    (count, building) =>
+      count + building.floors.reduce((floorCount, floor) => floorCount + floor.rooms.length, 0),
+    0
+  );
+
   return (
-    <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="border-b p-5">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Home className="size-5 text-primary" aria-hidden="true" />
-              <h3 className="truncate text-xl font-semibold">{asset.name}</h3>
-              <StatusPill status={asset.status} />
-              <MutedPill>{asset.abbreviation || "No code"}</MutedPill>
-              <MutedPill>{asset.type}</MutedPill>
-            </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {asset.buildings.length} buildings
-            </p>
-          </div>
-          <Button type="button" variant="destructive" size="sm" onClick={onRemove}>
-            <Trash2 className="size-4" aria-hidden="true" />
-            Delete asset
-          </Button>
+    <section className="rounded-lg border bg-card">
+      <div className="border-b p-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setIsOpen((current) => !current)}
+            aria-expanded={isOpen}
+            aria-label={`${isOpen ? "Collapse" : "Expand"} asset ${asset.name}`}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+              <ChevronDown
+                className={cn(
+                  "size-4 transition-transform duration-200",
+                  !isOpen && "-rotate-90"
+                )}
+                aria-hidden="true"
+              />
+            </span>
+            <Home className="size-5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="min-w-0">
+              <span className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="truncate text-lg font-semibold">{asset.name}</span>
+                <StatusPill status={asset.status} />
+                <MutedPill>{asset.abbreviation || "No code"}</MutedPill>
+                <MutedPill>{asset.type}</MutedPill>
+              </span>
+              <span className="mt-1 block text-sm text-muted-foreground">
+                {asset.buildings.length} buildings / {floorCount} floors / {roomCount} rooms
+              </span>
+            </span>
+          </button>
+          <DeleteMenu
+            entityLabel={`asset ${asset.name}`}
+            confirmationMessage={getAssetRemovalConfirmation(asset)}
+            onRemove={onRemove}
+            onDuplicate={onDuplicate}
+          />
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_140px_160px_160px]">
-          <label className="grid gap-2 text-sm font-medium">
-            Asset name
-            <Input
-              value={asset.name}
-              onChange={(event) =>
-                updateDraft((next) => {
-                  const target = findAsset(next, asset.clientId);
-                  if (target) {
-                    target.name = event.target.value;
-                  }
-                })
-              }
-              required
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Abbreviation
-            <Input
-              value={asset.abbreviation}
-              onChange={(event) =>
-                updateDraft((next) => {
-                  const target = findAsset(next, asset.clientId);
-                  if (target) {
-                    target.abbreviation = event.target.value.toUpperCase();
-                  }
-                })
-              }
-              pattern="[A-Za-z0-9]+"
-              minLength={2}
-              maxLength={12}
-              required
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Type
-            <select
-              value={asset.type}
-              onChange={(event) =>
-                updateDraft((next) => {
-                  const target = findAsset(next, asset.clientId);
-                  if (target) {
-                    target.type = event.target.value as AssetDraft["type"];
-                  }
-                })
-              }
-              className={selectClassName}
-            >
-              {assetTypeOptions.map((type) => (
-                <option key={type} value={type}>
-                  {type}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Status
-            <select
-              value={asset.status}
-              onChange={(event) =>
-                updateDraft((next) => {
-                  const target = findAsset(next, asset.clientId);
-                  if (target) {
-                    target.status = event.target.value as AssetDraft["status"];
-                  }
-                })
-              }
-              className={selectClassName}
-            >
-              {assetStatusOptions.map((statusOption) => (
-                <option key={statusOption} value={statusOption}>
-                  {statusOption}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
       </div>
 
-      <div className="grid gap-4 p-5">
-        {asset.buildings.map((building) => (
-          <BuildingEditor
-            key={building.clientId}
-            asset={asset}
-            building={building}
-            onAddFloor={() => onAddFloor(building.clientId)}
-            onAddRoom={(floorClientId) => onAddRoom(building.clientId, floorClientId)}
-            onRemove={() => onRemoveBuilding(building.clientId)}
-            onRemoveFloor={(floorClientId) =>
-              onRemoveFloor(building.clientId, floorClientId)
-            }
-            onRemoveRoom={(floorClientId, roomClientId) =>
-              onRemoveRoom(building.clientId, floorClientId, roomClientId)
-            }
-            updateDraft={updateDraft}
-          />
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full border-dashed"
-          onClick={onAddBuilding}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          Add building
-        </Button>
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        )}
+        aria-hidden={!isOpen}
+        inert={!isOpen}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="grid gap-3 p-4">
+            <label className="grid gap-2 text-sm font-medium">
+              Asset name
+              <Input
+                value={asset.name}
+                onChange={(event) =>
+                  updateDraft((next) => {
+                    const target = findAsset(next, asset.clientId);
+                    if (target) {
+                      target.name = event.target.value;
+                    }
+                  })
+                }
+                required
+              />
+            </label>
+            <div className="grid gap-3 md:grid-cols-[140px_160px_160px]">
+              <label className="grid gap-2 text-sm font-medium">
+                Abbreviation
+                <Input
+                  value={asset.abbreviation}
+                  onChange={(event) =>
+                    updateDraft((next) => {
+                      const target = findAsset(next, asset.clientId);
+                      if (target) {
+                        target.abbreviation = event.target.value.toUpperCase();
+                      }
+                    })
+                  }
+                  pattern="[A-Za-z0-9]+"
+                  minLength={2}
+                  maxLength={12}
+                  required
+                />
+              </label>
+              <label className="grid gap-2 text-sm font-medium">
+                Type
+                <select
+                  value={asset.type}
+                  onChange={(event) =>
+                    updateDraft((next) => {
+                      const target = findAsset(next, asset.clientId);
+                      if (target) {
+                        target.type = event.target.value as AssetDraft["type"];
+                      }
+                    })
+                  }
+                  className={selectClassName}
+                >
+                  {assetTypeOptions.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2 text-sm font-medium">
+                Status
+                <select
+                  value={asset.status}
+                  onChange={(event) =>
+                    updateDraft((next) => {
+                      const target = findAsset(next, asset.clientId);
+                      if (target) {
+                        target.status = event.target.value as AssetDraft["status"];
+                      }
+                    })
+                  }
+                  className={selectClassName}
+                >
+                  {assetStatusOptions.map((statusOption) => (
+                    <option key={statusOption} value={statusOption}>
+                      {statusOption}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid gap-4 bg-background/60 p-5">
+            {asset.buildings.map((building) => (
+              <BuildingEditor
+                key={building.clientId}
+                asset={asset}
+                onDuplicate={() => onDuplicateBuilding(building.clientId)}
+                building={building}
+                onAddFloor={() => onAddFloor(building.clientId)}
+                onAddRoom={(floorClientId) => onAddRoom(building.clientId, floorClientId)}
+                onRemove={() => onRemoveBuilding(building.clientId)}
+                onDuplicateFloor={(floorClientId) =>
+                  onDuplicateFloor(building.clientId, floorClientId)
+                }
+                onDuplicateRoom={(floorClientId, roomClientId) =>
+                  onDuplicateRoom(building.clientId, floorClientId, roomClientId)
+                }
+                onRemoveFloor={(floorClientId) =>
+                  onRemoveFloor(building.clientId, floorClientId)
+                }
+                onRemoveRoom={(floorClientId, roomClientId) =>
+                  onRemoveRoom(building.clientId, floorClientId, roomClientId)
+                }
+                updateDraft={updateDraft}
+              />
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-dashed"
+              onClick={onAddBuilding}
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              Add building
+            </Button>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -541,79 +711,122 @@ function AssetEditor({
 function BuildingEditor({
   asset,
   building,
+  onDuplicate,
   onAddFloor,
   onAddRoom,
   onRemove,
+  onDuplicateFloor,
+  onDuplicateRoom,
   onRemoveFloor,
   onRemoveRoom,
   updateDraft
 }: {
   asset: AssetDraft;
   building: BuildingDraft;
+  onDuplicate: () => void;
   onAddFloor: () => void;
   onAddRoom: (floorClientId: string) => void;
   onRemove: () => void;
+  onDuplicateFloor: (floorClientId: string) => void;
+  onDuplicateRoom: (floorClientId: string, roomClientId: string) => void;
   onRemoveFloor: (floorClientId: string) => void;
   onRemoveRoom: (floorClientId: string, roomClientId: string) => void;
   updateDraft: (mutator: (next: OrganizationStructureDraft) => void) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(() => !building.persistedId);
+
   return (
-    <div className="rounded-md border p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <label className="grid min-w-0 flex-1 gap-2 text-sm font-medium">
-          <span className="flex items-center gap-2">
-            <Building className="size-4 text-primary" aria-hidden="true" />
-            Building
-            <span className="text-muted-foreground">
+    <div className="rounded-md border bg-background p-4">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => setIsOpen((current) => !current)}
+          aria-expanded={isOpen}
+          aria-label={`${isOpen ? "Collapse" : "Expand"} building ${building.name}`}
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary/15">
+            <ChevronDown
+              className={cn(
+                "size-4 transition-transform duration-200",
+                !isOpen && "-rotate-90"
+              )}
+              aria-hidden="true"
+            />
+          </span>
+          <Building className="size-4 shrink-0 text-primary" aria-hidden="true" />
+          <span className="min-w-0">
+            <span className="block truncate font-semibold">{building.name}</span>
+            <span className="block text-sm text-muted-foreground">
               {building.floors.length} floors
             </span>
           </span>
-          <Input
-            value={building.name}
-            onChange={(event) =>
-              updateDraft((next) => {
-                const target = findBuilding(
-                  next,
-                  asset.clientId,
-                  building.clientId
-                );
-                if (target) {
-                  target.name = event.target.value;
-                }
-              })
-            }
-            className="max-w-sm"
-            required
-          />
-        </label>
-        <Button type="button" variant="destructive" size="sm" onClick={onRemove}>
-          <Trash2 className="size-4" aria-hidden="true" />
-          Delete building
-        </Button>
+        </button>
+        <DeleteMenu
+          entityLabel={`building ${building.name}`}
+          confirmationMessage={getBuildingRemovalConfirmation(building)}
+          onRemove={onRemove}
+          onDuplicate={onDuplicate}
+        />
       </div>
 
-      <div className="mt-4 grid gap-3">
-        {building.floors.map((floor) => (
-          <FloorEditor
-            key={floor.clientId}
-            asset={asset}
-            building={building}
-            floor={floor}
-            onAddRoom={() => onAddRoom(floor.clientId)}
-            onRemove={() => onRemoveFloor(floor.clientId)}
-            onRemoveRoom={(roomClientId) => onRemoveRoom(floor.clientId, roomClientId)}
-            updateDraft={updateDraft}
-          />
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full border-dashed"
-          onClick={onAddFloor}
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          Add floor
-        </Button>
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        )}
+        aria-hidden={!isOpen}
+        inert={!isOpen}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <label className="mt-4 grid gap-2 text-sm font-medium">
+            Building name
+            <Input
+              value={building.name}
+              onChange={(event) =>
+                updateDraft((next) => {
+                  const target = findBuilding(
+                    next,
+                    asset.clientId,
+                    building.clientId
+                  );
+                  if (target) {
+                    target.name = event.target.value;
+                  }
+                })
+              }
+              className="max-w-sm"
+              required
+            />
+          </label>
+          <div className="mt-4 grid gap-3">
+            {building.floors.map((floor) => (
+              <FloorEditor
+                key={floor.clientId}
+                asset={asset}
+                building={building}
+                floor={floor}
+                onDuplicate={() => onDuplicateFloor(floor.clientId)}
+                onAddRoom={() => onAddRoom(floor.clientId)}
+                onRemove={() => onRemoveFloor(floor.clientId)}
+                onDuplicateRoom={(roomClientId) =>
+                  onDuplicateRoom(floor.clientId, roomClientId)
+                }
+                onRemoveRoom={(roomClientId) => onRemoveRoom(floor.clientId, roomClientId)}
+                updateDraft={updateDraft}
+              />
+            ))}
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-dashed"
+              onClick={onAddFloor}
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              Add floor
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -623,99 +836,141 @@ function FloorEditor({
   asset,
   building,
   floor,
+  onDuplicate,
   onAddRoom,
   onRemove,
+  onDuplicateRoom,
   onRemoveRoom,
   updateDraft
 }: {
   asset: AssetDraft;
   building: BuildingDraft;
   floor: FloorDraft;
+  onDuplicate: () => void;
   onAddRoom: () => void;
   onRemove: () => void;
+  onDuplicateRoom: (roomClientId: string) => void;
   onRemoveRoom: (roomClientId: string) => void;
   updateDraft: (mutator: (next: OrganizationStructureDraft) => void) => void;
 }) {
+  const [isOpen, setIsOpen] = useState(() => !floor.persistedId);
+
   return (
-    <div className="rounded-md bg-secondary p-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div className="grid flex-1 gap-3 md:grid-cols-[1fr_120px]">
-          <label className="grid gap-2 text-sm font-medium">
-            <span className="flex items-center gap-2">
-              <Layers3 className="size-4 text-muted-foreground" aria-hidden="true" />
-              Floor name
+    <div className="rounded-md bg-secondary/70 p-4">
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          className="group flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => setIsOpen((current) => !current)}
+          aria-expanded={isOpen}
+          aria-label={`${isOpen ? "Collapse" : "Expand"} floor ${floor.name}`}
+        >
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background/70 text-muted-foreground transition-colors group-hover:bg-background">
+            <ChevronDown
+              className={cn(
+                "size-4 transition-transform duration-200",
+                !isOpen && "-rotate-90"
+              )}
+              aria-hidden="true"
+            />
+          </span>
+          <Layers3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="min-w-0">
+            <span className="block truncate font-semibold">{floor.name}</span>
+            <span className="block text-sm text-muted-foreground">
+              Floor {floor.number} / {floor.rooms.length} rooms
             </span>
-            <Input
-              value={floor.name}
-              onChange={(event) =>
-                updateDraft((next) => {
-                  const target = findFloor(
-                    next,
-                    asset.clientId,
-                    building.clientId,
-                    floor.clientId
-                  );
-                  if (target) {
-                    target.name = event.target.value;
-                  }
-                })
-              }
-              required
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Number
-            <Input
-              type="number"
-              value={floor.number}
-              onChange={(event) =>
-                updateDraft((next) => {
-                  const target = findFloor(
-                    next,
-                    asset.clientId,
-                    building.clientId,
-                    floor.clientId
-                  );
-                  if (target) {
-                    target.number = Number(event.target.value);
-                  }
-                })
-              }
-              required
-            />
-          </label>
-        </div>
-        <Button type="button" variant="destructive" size="sm" onClick={onRemove}>
-          <Trash2 className="size-4" aria-hidden="true" />
-          Delete floor
-        </Button>
+          </span>
+        </button>
+        <DeleteMenu
+          entityLabel={`floor ${floor.name}`}
+          confirmationMessage={getFloorRemovalConfirmation(floor)}
+          onRemove={onRemove}
+          onDuplicate={onDuplicate}
+        />
       </div>
 
-      {floor.rooms.length ? (
-        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {floor.rooms.map((room) => (
-            <RoomEditor
-              key={room.clientId}
-              asset={asset}
-              building={building}
-              floor={floor}
-              room={room}
-              onRemove={() => onRemoveRoom(room.clientId)}
-              updateDraft={updateDraft}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      <Button
-        type="button"
-        variant="outline"
-        className="mt-3 w-full border-dashed bg-card"
-        onClick={onAddRoom}
+      <div
+        className={cn(
+          "grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none",
+          isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+        )}
+        aria-hidden={!isOpen}
+        inert={!isOpen}
       >
-        <Plus className="size-4" aria-hidden="true" />
-        Add room
-      </Button>
+        <div className="min-h-0 overflow-hidden">
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_120px]">
+            <label className="grid gap-2 text-sm font-medium">
+              Floor name
+              <Input
+                value={floor.name}
+                onChange={(event) =>
+                  updateDraft((next) => {
+                    const target = findFloor(
+                      next,
+                      asset.clientId,
+                      building.clientId,
+                      floor.clientId
+                    );
+                    if (target) {
+                      target.name = event.target.value;
+                    }
+                  })
+                }
+                required
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Number
+              <Input
+                type="number"
+                value={floor.number}
+                onChange={(event) =>
+                  updateDraft((next) => {
+                    const target = findFloor(
+                      next,
+                      asset.clientId,
+                      building.clientId,
+                      floor.clientId
+                    );
+                    if (target) {
+                      target.number = Number(event.target.value);
+                    }
+                  })
+                }
+                required
+              />
+            </label>
+          </div>
+
+          {floor.rooms.length ? (
+            <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {floor.rooms.map((room) => (
+                <RoomEditor
+                  key={room.clientId}
+                  asset={asset}
+                  building={building}
+                  floor={floor}
+                  onDuplicate={() => onDuplicateRoom(room.clientId)}
+                  room={room}
+                  onRemove={() => onRemoveRoom(room.clientId)}
+                  updateDraft={updateDraft}
+                />
+              ))}
+            </div>
+          ) : null}
+
+          <Button
+            type="button"
+            variant="outline"
+            className="mt-3 w-full border-dashed bg-card"
+            onClick={onAddRoom}
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            Add room
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -725,6 +980,7 @@ function RoomEditor({
   building,
   floor,
   room,
+  onDuplicate,
   onRemove,
   updateDraft
 }: {
@@ -732,6 +988,7 @@ function RoomEditor({
   building: BuildingDraft;
   floor: FloorDraft;
   room: RoomDraft;
+  onDuplicate: () => void;
   onRemove: () => void;
   updateDraft: (mutator: (next: OrganizationStructureDraft) => void) => void;
 }) {
@@ -756,10 +1013,15 @@ function RoomEditor({
             })
           }
           aria-label="Room number"
-          className="h-9 min-w-0"
+          className="h-9 min-w-0 flex-1"
           required
         />
         <StatusPill status={room.status} />
+        <DeleteMenu
+          entityLabel={`room ${room.roomNumber}`}
+          onRemove={onRemove}
+          onDuplicate={onDuplicate}
+        />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <label className="grid gap-1 text-xs font-medium text-muted-foreground">
@@ -809,12 +1071,288 @@ function RoomEditor({
           />
         </label>
       </div>
-      <Button type="button" variant="destructive" size="sm" onClick={onRemove}>
-        <Trash2 className="size-4" aria-hidden="true" />
-        Delete room
-      </Button>
     </div>
   );
+}
+
+function DeleteMenu({
+  entityLabel,
+  confirmationMessage,
+  onDuplicate,
+  onRemove
+}: {
+  entityLabel: string;
+  confirmationMessage?: string;
+  onDuplicate: () => void;
+  onRemove: () => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuItemRef = useRef<HTMLButtonElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Node && menuRef.current?.contains(event.target)) {
+        return;
+      }
+
+      setIsOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      menuItemRef.current?.focus();
+    }
+  }, [isOpen]);
+
+  function handleRemove() {
+    setIsOpen(false);
+
+    if (confirmationMessage) {
+      setIsConfirmOpen(true);
+      return;
+    }
+
+    onRemove();
+  }
+
+  function handleDuplicate() {
+    setIsOpen(false);
+    onDuplicate();
+  }
+
+  function closeConfirmation() {
+    setIsConfirmOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function confirmRemove() {
+    setIsConfirmOpen(false);
+    onRemove();
+  }
+
+  return (
+    <div ref={menuRef} className="relative shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="inline-flex size-11 items-center justify-center rounded-md p-0 text-sm font-medium transition-colors hover:bg-secondary hover:text-secondary-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => setIsOpen((current) => !current)}
+        aria-label={`More actions for ${entityLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        title="More actions"
+      >
+        <MoreHorizontal className="size-5" aria-hidden="true" />
+      </button>
+      {isOpen ? (
+        <div
+          className="absolute right-0 top-full z-50 mt-2 min-w-48 rounded-md border bg-popover p-1 shadow-lg"
+          role="menu"
+          aria-label={`Actions for ${entityLabel}`}
+        >
+          <button
+            ref={menuItemRef}
+            type="button"
+            role="menuitem"
+            className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm font-medium outline-none transition-colors hover:bg-secondary focus-visible:bg-secondary"
+            onClick={handleDuplicate}
+          >
+            <Copy className="size-4" aria-hidden="true" />
+            Duplicate
+          </button>
+          <div className="my-1 h-px bg-border" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm font-medium text-destructive outline-none transition-colors hover:bg-destructive/10 focus-visible:bg-destructive/10"
+            onClick={handleRemove}
+          >
+            <Trash2 className="size-4" aria-hidden="true" />
+            Remove from draft
+          </button>
+        </div>
+      ) : null}
+      {confirmationMessage ? (
+        <ConfirmationDialog
+          open={isConfirmOpen}
+          message={confirmationMessage}
+          onConfirm={confirmRemove}
+          onClose={closeConfirmation}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ConfirmationDialog({
+  open,
+  message,
+  title = "Remove from draft?",
+  confirmLabel = "Remove from draft",
+  onConfirm,
+  onClose
+}: {
+  open: boolean;
+  message: string;
+  title?: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const descriptionId = useId();
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    if (open && !dialog.open) {
+      dialog.showModal();
+      requestAnimationFrame(() => {
+        dialog
+          .querySelector<HTMLButtonElement>("[data-dialog-cancel]")
+          ?.focus();
+      });
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) {
+      return;
+    }
+
+    dialog.addEventListener("close", onClose);
+    return () => dialog.removeEventListener("close", onClose);
+  }, [onClose]);
+
+  function handleConfirm() {
+    dialogRef.current?.close();
+    onConfirm();
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="organization-confirm-dialog w-[calc(100%-2rem)] max-w-md rounded-lg border bg-card p-0 text-card-foreground shadow-2xl outline-none"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+    >
+      <div className="grid gap-5 p-5">
+        <div className="flex items-start gap-3">
+          <div className="rounded-md bg-destructive/10 p-2 text-destructive">
+            <TriangleAlert className="size-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-base font-semibold">
+              {title}
+            </h2>
+            <p id={descriptionId} className="mt-2 text-sm leading-6 text-muted-foreground">
+              {message}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            data-dialog-cancel
+            onClick={() => dialogRef.current?.close()}
+          >
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" onClick={handleConfirm}>
+            <Trash2 className="size-4" aria-hidden="true" />
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </dialog>
+  );
+}
+
+function getAssetRemovalConfirmation(asset: AssetDraft) {
+  const floorCount = asset.buildings.reduce(
+    (count, building) => count + building.floors.length,
+    0
+  );
+  const roomCount = asset.buildings.reduce(
+    (count, building) =>
+      count + building.floors.reduce((floorTotal, floor) => floorTotal + floor.rooms.length, 0),
+    0
+  );
+
+  if (!asset.buildings.length) {
+    return undefined;
+  }
+
+  return `Remove asset ${asset.name} from this draft? This will also remove ${formatCount(
+    asset.buildings.length,
+    "building"
+  )}, ${formatCount(floorCount, "floor")}, and ${formatCount(
+    roomCount,
+    "room"
+  )}. You can restore it with Cancel.`;
+}
+
+function getBuildingRemovalConfirmation(building: BuildingDraft) {
+  const roomCount = building.floors.reduce(
+    (count, floor) => count + floor.rooms.length,
+    0
+  );
+
+  if (!building.floors.length) {
+    return undefined;
+  }
+
+  return `Remove building ${building.name} from this draft? This will also remove ${formatCount(
+    building.floors.length,
+    "floor"
+  )} and ${formatCount(roomCount, "room")}. You can restore it with Cancel.`;
+}
+
+function getFloorRemovalConfirmation(floor: FloorDraft) {
+  if (!floor.rooms.length) {
+    return undefined;
+  }
+
+  return `Remove floor ${floor.name} from this draft? This will also remove ${formatCount(
+    floor.rooms.length,
+    "room"
+  )}. You can restore it with Cancel.`;
+}
+
+function formatCount(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function FloatingActions({
@@ -868,36 +1406,36 @@ function DeleteOrganizationButton({
 }: {
   organizationName: string;
 }) {
-  return (
-    <Button
-      type="button"
-      variant="destructive"
-      size="sm"
-      onClick={() => {
-        if (
-          window.confirm(
-            `Delete ${organizationName || "this organization"} and all related structure?`
-          )
-        ) {
-          const deleteForm = document.getElementById("delete-organization-form");
-          if (deleteForm instanceof HTMLFormElement) {
-            deleteForm.requestSubmit();
-          }
-        }
-      }}
-    >
-      <TriangleAlert className="size-4" aria-hidden="true" />
-      Delete organization
-    </Button>
-  );
-}
+  const [isOpen, setIsOpen] = useState(false);
+  const displayName = organizationName || "this organization";
 
-function Metric({ label, value }: { label: string; value: number }) {
+  function confirmDelete() {
+    const deleteForm = document.getElementById("delete-organization-form");
+    if (deleteForm instanceof HTMLFormElement) {
+      deleteForm.requestSubmit();
+    }
+  }
+
   return (
-    <div className="rounded-lg border bg-card px-4 py-3">
-      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
-    </div>
+    <>
+      <Button
+        type="button"
+        variant="destructive"
+        size="sm"
+        onClick={() => setIsOpen(true)}
+      >
+        <TriangleAlert className="size-4" aria-hidden="true" />
+        Delete organization
+      </Button>
+      <ConfirmationDialog
+        open={isOpen}
+        title="Delete organization?"
+        message={`Delete ${displayName} and all related structure? This action cannot be undone.`}
+        confirmLabel="Delete organization"
+        onConfirm={confirmDelete}
+        onClose={() => setIsOpen(false)}
+      />
+    </>
   );
 }
 
@@ -961,25 +1499,60 @@ function MutedPill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function getStats(draft: OrganizationStructureDraft) {
-  return draft.assets.reduce(
-    (stats, asset) => {
-      stats.assets += 1;
-      stats.buildings += asset.buildings.length;
-      for (const building of asset.buildings) {
-        stats.floors += building.floors.length;
-        for (const floor of building.floors) {
-          stats.rooms += floor.rooms.length;
-        }
-      }
-      return stats;
-    },
-    { assets: 0, buildings: 0, floors: 0, rooms: 0 }
-  );
-}
-
 function cloneDraft(draft: OrganizationStructureDraft): OrganizationStructureDraft {
   return JSON.parse(JSON.stringify(draft)) as OrganizationStructureDraft;
+}
+
+function duplicateBuildingDraft(
+  building: BuildingDraft,
+  nextClientId: (prefix: string) => string
+): BuildingDraft {
+  return {
+    clientId: nextClientId("building"),
+    name: building.name,
+    floors: building.floors.map((floor) =>
+      duplicateFloorDraft(floor, nextClientId)
+    )
+  };
+}
+
+function duplicateFloorDraft(
+  floor: FloorDraft,
+  nextClientId: (prefix: string) => string
+): FloorDraft {
+  return {
+    clientId: nextClientId("floor"),
+    name: floor.name,
+    number: floor.number,
+    rooms: floor.rooms.map((room) => duplicateRoomDraft(room, nextClientId))
+  };
+}
+
+function duplicateRoomDraft(
+  room: RoomDraft,
+  nextClientId: (prefix: string) => string
+): RoomDraft {
+  return {
+    clientId: nextClientId("room"),
+    roomNumber: room.roomNumber,
+    rentAmount: room.rentAmount,
+    depositAmount: room.depositAmount,
+    status: room.status
+  };
+}
+
+function nextCopyName(name: string, existingNames: string[]) {
+  const baseName = name.trim() || "Untitled";
+  const preferredName = `${baseName} Copy`;
+  let candidate = preferredName;
+  let suffix = 2;
+
+  while (existingNames.includes(candidate)) {
+    candidate = `${preferredName} ${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
 }
 
 function findAsset(draft: OrganizationStructureDraft, assetClientId: string) {

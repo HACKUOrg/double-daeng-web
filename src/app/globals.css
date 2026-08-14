@@ -54,3 +54,52 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+.organization-confirm-dialog {
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    display 180ms ease allow-discrete,
+    overlay 180ms ease allow-discrete;
+  transition-behavior: allow-discrete;
+}
+
+.organization-confirm-dialog[open] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.organization-confirm-dialog::backdrop {
+  background: rgb(15 23 42 / 0);
+  transition:
+    background 180ms ease,
+    display 180ms ease allow-discrete,
+    overlay 180ms ease allow-discrete;
+  transition-behavior: allow-discrete;
+}
+
+.organization-confirm-dialog[open]::backdrop {
+  background: rgb(15 23 42 / 0.45);
+}
+
+@starting-style {
+  .organization-confirm-dialog[open] {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+
+  .organization-confirm-dialog[open]::backdrop {
+    background: rgb(15 23 42 / 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .organization-confirm-dialog,
+  .organization-confirm-dialog::backdrop {
+    transition: none;
+  }
+}

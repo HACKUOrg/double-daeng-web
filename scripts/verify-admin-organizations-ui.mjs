@@ -72,6 +72,17 @@ for (const expected of [
   "Save changes",
   "Cancel",
   "Delete organization",
+  "DeleteMenu",
+  "ConfirmationDialog",
+  "showModal()",
+  "<dialog",
+  "Duplicate",
+  "duplicateAsset",
+  "duplicateBuilding",
+  "duplicateFloor",
+  "duplicateRoom",
+  "Remove from draft",
+  'aria-haspopup="menu"',
   "No assets yet",
   "Create asset",
   "Add building",
@@ -90,7 +101,12 @@ for (const unexpected of [
   "action={createAsset}",
   "action={createBuilding}",
   "action={createFloor}",
-  "action={createRoom}"
+  "action={createRoom}",
+  "Delete asset",
+  "Delete building",
+  "Delete floor",
+  "Delete room",
+  "window.confirm"
 ]) {
   assertExcludes(editor, unexpected, files.editor);
 }
