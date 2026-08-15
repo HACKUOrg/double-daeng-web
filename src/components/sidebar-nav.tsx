@@ -221,7 +221,7 @@ export function SidebarNav({
       <aside
         ref={desktopSidebarRef}
         onMouseLeave={blurActiveSidebarControl}
-        className="group fixed inset-y-0 left-0 z-30 hidden w-19 flex-col border-r bg-card shadow-sm transition-[width] duration-200 ease-out hover:w-64 lg:flex"
+        className="group fixed inset-y-0 left-0 z-30 hidden w-[4.75rem] flex-col border-r bg-card shadow-sm transition-[width] duration-200 ease-out hover:w-64 lg:flex"
       >
         <SidebarContent
           ariaLabel={ariaLabel}
