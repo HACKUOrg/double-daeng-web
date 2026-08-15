@@ -1216,7 +1216,7 @@ function DeleteMenu({
         ? createPortal(
             <div
               ref={menuPortalRef}
-              className="fixed z-[100] w-48 rounded-md border bg-popover p-1 shadow-lg"
+              className="fixed z-100 w-48 rounded-md border bg-popover p-1 shadow-lg"
               style={{ top: menuPosition.top, left: menuPosition.left }}
               role="menu"
               aria-label={`Actions for ${entityLabel}`}
@@ -1417,7 +1417,7 @@ function FloatingActions({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-x-0 bottom-4 z-40 px-4 lg:left-[4.75rem]">
+    <div className="fixed inset-x-0 bottom-4 z-40 px-4 lg:left-19">
       <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-lg border bg-card p-3 shadow-xl md:flex-row md:items-center md:justify-between">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 rounded-md bg-primary/10 p-2 text-primary">
