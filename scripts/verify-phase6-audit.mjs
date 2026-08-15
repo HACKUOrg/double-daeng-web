@@ -249,6 +249,30 @@ async function assertFilteredAuditPage(cookies) {
   }
 }
 
+async function assertPaginationPage(cookies) {
+  const response = await fetchAuthed("/admin/audit?page=1&limit=10", cookies);
+  const html = await response.text();
+
+  if (!response.ok) {
+    throw new Error("/admin/audit pagination returned " + response.status);
+  }
+
+  for (const expected of [
+    "Page 1 of",
+    'name="page" value="1"',
+    'name="limit" value="10"'
+  ]) {
+    if (!html.includes(expected)) {
+      throw new Error("/admin/audit pagination did not include: " + expected);
+    }
+  }
+
+  const secondPage = await fetchAuthed("/admin/audit?page=2&limit=10", cookies);
+  if (!secondPage.ok) {
+    throw new Error("/admin/audit second page returned " + secondPage.status);
+  }
+}
+
 async function assertForbiddenAuditPage(cookies) {
   const response = await fetchAuthed("/admin/audit", cookies, "manual");
   const location = response.headers.get("location") ?? "";
@@ -273,6 +297,7 @@ try {
 
   await assertAuditPage(saCookies);
   await assertFilteredAuditPage(saCookies);
+  await assertPaginationPage(saCookies);
   await assertForbiddenAuditPage(managerCookies);
 
   console.log("PHASE6_AUDIT_OK");

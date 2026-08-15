@@ -1,10 +1,14 @@
 import Link from "next/link";
-import { ClipboardList, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ClipboardList, ChevronLeft, ChevronRight } from "lucide-react";
 import { z } from "zod";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { requirePermission } from "@/lib/auth/session";
 import { getPrisma } from "@/lib/prisma";
+import { cn } from "@/lib/utils";
+import { AuditFilterPanel } from "./audit-filter-panel";
+import {
+  AuditLogRowAccordion,
+  type AuditLogRow
+} from "./audit-log-row-accordion";
 
 type AuditPageProps = {
   searchParams: Promise<{
@@ -13,44 +17,25 @@ type AuditPageProps = {
     entityType?: string;
     organizationId?: string;
     q?: string;
+    page?: string;
+    limit?: string;
   }>;
 };
 
 const uuidSchema = z.string().uuid();
 const textFilterSchema = z.string().trim().max(120);
-const pageSize = 50;
+const pageSchema = z.coerce.number().int().min(1).catch(1);
+const limitValues = [10, 25, 50] as const;
+const defaultLimit = 10;
 
 export default async function AuditPage({ searchParams }: AuditPageProps) {
   await requirePermission("audit.view");
   const params = await parseFilters(await searchParams);
   const prisma = getPrisma();
   const where = buildAuditWhere(params);
-  const [auditLogs, actionsAndEntities, organizations, actors] =
+  const [totalCount, actionsAndEntities, organizations, actors] =
     await Promise.all([
-      prisma.auditLog.findMany({
-        where,
-        include: {
-          actor: {
-            select: {
-              id: true,
-              email: true,
-              displayName: true,
-              role: true
-            }
-          },
-          organization: {
-            select: {
-              id: true,
-              name: true,
-              status: true
-            }
-          }
-        },
-        orderBy: {
-          createdAt: "desc"
-        },
-        take: pageSize
-      }),
+      prisma.auditLog.count({ where }),
       prisma.auditLog.findMany({
         select: {
           action: true,
@@ -82,159 +67,90 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
         orderBy: [{ role: "asc" }, { email: "asc" }]
       })
     ]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / params.limit));
+  const currentPage = Math.min(params.page, totalPages);
+  const auditLogs = await prisma.auditLog.findMany({
+    where,
+    include: {
+      actor: {
+        select: {
+          id: true,
+          email: true,
+          displayName: true,
+          role: true
+        }
+      },
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          status: true
+        }
+      }
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: (currentPage - 1) * params.limit,
+    take: params.limit
+  });
+
   const actions = [...new Set(actionsAndEntities.map((item) => item.action))];
   const entityTypes = [
     ...new Set(actionsAndEntities.map((item) => item.entityType))
   ];
+  const activeFilterCount = [
+    params.action,
+    params.actorUserId,
+    params.entityType,
+    params.organizationId,
+    params.q
+  ].filter(Boolean).length;
+
+  const rows: AuditLogRow[] = auditLogs.map((log) => ({
+    id: log.id,
+    action: log.action,
+    entityType: log.entityType,
+    entityId: log.entityId,
+    before: log.before,
+    after: log.after,
+    createdAt: log.createdAt.toISOString(),
+    actor: log.actor,
+    organization: log.organization
+  }));
 
   return (
-    <div className="grid gap-6">
-      <section className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <p className="text-sm font-medium text-primary">Phase 6</p>
-          <h1 className="mt-2 text-3xl font-semibold tracking-normal">
-            Audit log
-          </h1>
-          <p className="mt-3 max-w-2xl text-muted-foreground">
-            Review the latest system changes, actors, organization scope, and
-            before/after snapshots.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-sm md:min-w-56">
-          <Metric label="Showing" value={auditLogs.length} />
-          <Metric label="Limit" value={pageSize} />
-        </div>
+    <div className="grid min-w-0 gap-6">
+      <section className="grid gap-3">
+        <p className="text-sm font-medium text-primary">Phase 6</p>
+        <h1 className="text-3xl font-semibold tracking-normal">Audit log</h1>
+        <p className="max-w-2xl text-muted-foreground">
+          Review the latest system changes, actors, organization scope, and
+          before/after snapshots.
+        </p>
       </section>
 
-      <section className="rounded-lg border bg-card p-5">
-        <div className="mb-4 flex items-center gap-2">
-          <Filter className="size-4 text-primary" aria-hidden="true" />
-          <h2 className="text-base font-semibold">Filters</h2>
+      <section className="min-w-0 overflow-hidden rounded-lg border bg-card">
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b px-5 py-4">
+          <div className="flex min-w-0 items-center gap-2">
+            <ClipboardList className="size-4 shrink-0 text-primary" aria-hidden="true" />
+            <h2 className="text-base font-semibold">Recent activity</h2>
+          </div>
+          <AuditFilterPanel
+            actionOptions={actions}
+            actorOptions={actors}
+            entityOptions={entityTypes}
+            organizationOptions={organizations}
+            values={params}
+            activeFilterCount={activeFilterCount}
+            initialOpen={activeFilterCount > 0}
+            limit={params.limit}
+          />
         </div>
-        <form
-          action="/admin/audit"
-          className="grid gap-3 lg:grid-cols-[1fr_170px_170px_1fr_1fr_auto_auto]"
-        >
-          <label className="grid gap-2 text-sm font-medium">
-            Search
-            <Input
-              name="q"
-              defaultValue={params.q}
-              placeholder="user.update or email"
-            />
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Action
-            <select
-              name="action"
-              defaultValue={params.action}
-              className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">All actions</option>
-              {actions.map((action) => (
-                <option key={action} value={action}>
-                  {action}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Entity
-            <select
-              name="entityType"
-              defaultValue={params.entityType}
-              className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">All entities</option>
-              {entityTypes.map((entityType) => (
-                <option key={entityType} value={entityType}>
-                  {entityType}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Organization
-            <select
-              name="organizationId"
-              defaultValue={params.organizationId}
-              className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">All organizations</option>
-              {organizations.map((organization) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name} - {organization.status}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-2 text-sm font-medium">
-            Actor
-            <select
-              name="actorUserId"
-              defaultValue={params.actorUserId}
-              className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">All actors</option>
-              {actors.map((actor) => (
-                <option key={actor.id} value={actor.id}>
-                  {actor.email} - {actor.role}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button type="submit" className="self-end">
-            <Search className="size-4" aria-hidden="true" />
-            Apply
-          </Button>
-          <Button asChild type="button" variant="outline" className="self-end">
-            <Link href="/admin/audit">
-              <X className="size-4" aria-hidden="true" />
-              Clear
-            </Link>
-          </Button>
-        </form>
-      </section>
 
-      <section className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <h2 className="text-base font-semibold">Recent activity</h2>
-          <RefreshCw className="size-4 text-muted-foreground" aria-hidden="true" />
-        </div>
-        {auditLogs.length ? (
+        {rows.length ? (
           <div className="divide-y">
-            {auditLogs.map((log) => (
-              <article key={log.id} className="grid gap-4 p-5">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <ClipboardList
-                        className="size-4 text-primary"
-                        aria-hidden="true"
-                      />
-                      <h3 className="font-semibold">{log.action}</h3>
-                      <StatusPill label={log.entityType} />
-                      {log.organization ? (
-                        <StatusPill label={log.organization.name} muted />
-                      ) : null}
-                    </div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {log.actor
-                        ? `${log.actor.displayName} - ${log.actor.email}`
-                        : "System or deleted actor"}{" "}
-                      at {formatDate(log.createdAt)}
-                    </p>
-                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                      entity_id={log.entityId}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <SnapshotBlock title="Before" value={log.before} />
-                  <SnapshotBlock title="After" value={log.after} />
-                </div>
-              </article>
+            {rows.map((row) => (
+              <AuditLogRowAccordion key={row.id} log={row} />
             ))}
           </div>
         ) : (
@@ -247,6 +163,14 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
             </p>
           </div>
         )}
+
+        <AuditPagination
+          page={currentPage}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          limit={params.limit}
+          filters={params}
+        />
       </section>
     </div>
   );
@@ -258,8 +182,17 @@ async function parseFilters(raw: Awaited<AuditPageProps["searchParams"]>) {
     actorUserId: parseUuidFilter(raw.actorUserId),
     entityType: textFilterSchema.safeParse(raw.entityType ?? "").data ?? "",
     organizationId: parseUuidFilter(raw.organizationId),
-    q: textFilterSchema.safeParse(raw.q ?? "").data ?? ""
+    q: textFilterSchema.safeParse(raw.q ?? "").data ?? "",
+    page: pageSchema.parse(raw.page ?? "1"),
+    limit: parseLimit(raw.limit)
   };
+}
+
+function parseLimit(value?: string) {
+  const parsed = Number(value ?? defaultLimit);
+  return limitValues.includes(parsed as (typeof limitValues)[number])
+    ? parsed
+    : defaultLimit;
 }
 
 function parseUuidFilter(value?: string) {
@@ -320,52 +253,114 @@ function buildAuditWhere(filters: Awaited<ReturnType<typeof parseFilters>>) {
   };
 }
 
-function Metric({ label, value }: { label: string; value: number }) {
+function AuditPagination({
+  page,
+  totalPages,
+  totalCount,
+  limit,
+  filters
+}: {
+  page: number;
+  totalPages: number;
+  totalCount: number;
+  limit: number;
+  filters: Awaited<ReturnType<typeof parseFilters>>;
+}) {
+  const firstItem = totalCount ? (page - 1) * limit + 1 : 0;
+  const lastItem = Math.min(page * limit, totalCount);
+  const hrefForPage = (nextPage: number) => {
+    const query = new URLSearchParams();
+    query.set("page", String(nextPage));
+    query.set("limit", String(limit));
+    appendFilters(query, filters);
+    return `/admin/audit?${query.toString()}`;
+  };
+  const hrefForLimit = (nextLimit: number) => {
+    const query = new URLSearchParams();
+    query.set("page", "1");
+    query.set("limit", String(nextLimit));
+    appendFilters(query, filters);
+    return `/admin/audit?${query.toString()}`;
+  };
+
   return (
-    <div className="rounded-lg border bg-card px-4 py-3">
-      <p className="text-xs font-medium uppercase text-muted-foreground">
-        {label}
+    <div className="flex flex-col gap-3 border-t px-5 py-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-muted-foreground">
+        Showing {firstItem}–{lastItem} of {totalCount}
       </p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
+      <div className="flex items-center justify-between gap-3 sm:justify-end">
+        <div className="flex items-center gap-1.5" aria-label="Rows per page">
+          <span className="hidden text-muted-foreground sm:inline">Rows</span>
+          {limitValues.map((value) => (
+            <Link
+              key={value}
+              href={hrefForLimit(value)}
+              aria-current={value === limit ? "page" : undefined}
+              className={cn(
+                "inline-flex h-8 min-w-8 items-center justify-center rounded-md border px-2 text-xs font-medium transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                value === limit && "border-primary/40 bg-primary/10 text-primary"
+              )}
+            >
+              {value}
+            </Link>
+          ))}
+        </div>
+        <span className="whitespace-nowrap text-muted-foreground">
+          Page {page} of {totalPages}
+        </span>
+        <div className="flex items-center gap-2">
+          <PaginationLink
+            href={hrefForPage(Math.max(1, page - 1))}
+            disabled={page <= 1}
+            label="Previous page"
+            icon={<ChevronLeft className="size-4" aria-hidden="true" />}
+          />
+          <PaginationLink
+            href={hrefForPage(Math.min(totalPages, page + 1))}
+            disabled={page >= totalPages}
+            label="Next page"
+            icon={<ChevronRight className="size-4" aria-hidden="true" />}
+          />
+        </div>
+      </div>
     </div>
   );
 }
 
-function StatusPill({ label, muted }: { label: string; muted?: boolean }) {
-  const className = muted
-    ? "border-muted bg-secondary text-muted-foreground"
-    : "border-primary/30 bg-primary/10 text-primary";
-
+function PaginationLink({
+  href,
+  disabled,
+  label,
+  icon
+}: {
+  href: string;
+  disabled: boolean;
+  label: string;
+  icon: React.ReactNode;
+}) {
   return (
-    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}>
-      {label}
-    </span>
+    <Link
+      href={href}
+      aria-label={label}
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : undefined}
+      className={cn(
+        "inline-flex size-10 items-center justify-center rounded-md border bg-background transition-colors hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        disabled && "pointer-events-none opacity-40"
+      )}
+    >
+      {icon}
+    </Link>
   );
 }
 
-function SnapshotBlock({ title, value }: { title: string; value: unknown }) {
-  if (!value) {
-    return (
-      <div className="rounded-md border bg-background p-4 text-sm text-muted-foreground">
-        <p className="font-medium text-foreground">{title}</p>
-        <p className="mt-2">No snapshot</p>
-      </div>
-    );
-  }
-
-  return (
-    <details className="rounded-md border bg-background p-4">
-      <summary className="cursor-pointer text-sm font-medium">{title}</summary>
-      <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md bg-secondary p-3 font-mono text-xs text-secondary-foreground">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    </details>
-  );
-}
-
-function formatDate(date: Date) {
-  return date.toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  });
+function appendFilters(
+  query: URLSearchParams,
+  filters: Awaited<ReturnType<typeof parseFilters>>
+) {
+  if (filters.action) query.set("action", filters.action);
+  if (filters.actorUserId) query.set("actorUserId", filters.actorUserId);
+  if (filters.entityType) query.set("entityType", filters.entityType);
+  if (filters.organizationId) query.set("organizationId", filters.organizationId);
+  if (filters.q) query.set("q", filters.q);
 }
