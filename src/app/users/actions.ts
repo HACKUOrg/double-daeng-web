@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { requireAnyPermission } from "@/lib/auth/session";
+import { requireAnyPermission, requirePermission } from "@/lib/auth/session";
 import { writeAuditLog } from "@/lib/audit";
 import { getPrisma } from "@/lib/prisma";
 import { canCreateRole, type Role } from "@/lib/rbac";
@@ -216,6 +216,244 @@ function revalidateUsers(actorRole: Role) {
   if (actorRole !== "SA") {
     revalidatePath("/app/users");
   }
+}
+
+function adminUserPath(userId?: string, search?: string) {
+  const path = userId ? `/admin/users/${userId}` : "/admin/users/new";
+  return search ? `${path}?${search}` : path;
+}
+
+function invalidAdminUser(userId?: string): never {
+  redirect(adminUserPath(userId, "error=invalid-user"));
+}
+
+function forbiddenAdminUser(userId?: string): never {
+  redirect(adminUserPath(userId, "error=forbidden-user"));
+}
+
+async function requireAdminUserManager() {
+  const actor = await requirePermission("users.manage.all");
+
+  return {
+    actor,
+    prisma: getPrisma()
+  };
+}
+
+async function getAdminManagedUserOrRedirect({
+  actor,
+  prisma,
+  userId
+}: {
+  actor: Awaited<ReturnType<typeof requirePermission>>;
+  prisma: ReturnType<typeof getPrisma>;
+  userId: string;
+}) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      memberships: {
+        include: {
+          organization: true
+        },
+        orderBy: {
+          organization: {
+            name: "asc"
+          }
+        }
+      }
+    }
+  });
+
+  if (!user || user.role === "SA" || user.role === "RESIDENT") {
+    invalidAdminUser(userId);
+  }
+
+  if (!canCreateRole(actor.role as Role, user.role as Role)) {
+    forbiddenAdminUser(userId);
+  }
+
+  return user;
+}
+
+export async function createAdminManagedUser(formData: FormData) {
+  const { actor, prisma } = await requireAdminUserManager();
+  const actorRole = actor.role as Role;
+  const parsed = z
+    .object({
+      email: emailSchema,
+      password: passwordSchema,
+      displayName: displayNameSchema,
+      role: managedRoleSchema
+    })
+    .safeParse({
+      email: getString(formData, "email"),
+      password: getString(formData, "password"),
+      displayName: getString(formData, "displayName"),
+      role: getString(formData, "role")
+    });
+
+  if (!parsed.success) {
+    invalidAdminUser();
+  }
+
+  if (!canCreateRole(actorRole, parsed.data.role)) {
+    forbiddenAdminUser();
+  }
+
+  const supabaseAdmin = createAdminClient();
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email: parsed.data.email,
+    password: parsed.data.password,
+    email_confirm: true,
+    app_metadata: {
+      role: parsed.data.role,
+      status: "ACTIVE"
+    },
+    user_metadata: {
+      display_name: parsed.data.displayName
+    }
+  });
+  const authUserId = data.user?.id;
+
+  if (error || !authUserId) {
+    invalidAdminUser();
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          authUserId,
+          email: parsed.data.email,
+          displayName: parsed.data.displayName,
+          role: parsed.data.role,
+          status: "ACTIVE"
+        }
+      });
+
+      await writeAuditLog(tx, {
+        actorUserId: actor.id,
+        action: "user.create",
+        entityType: "user",
+        entityId: user.id,
+        organizationId: null,
+        after: userSnapshot(user)
+      });
+    });
+  } catch (createError) {
+    await supabaseAdmin.auth.admin.deleteUser(authUserId);
+    throw createError;
+  }
+
+  revalidateUsers(actorRole);
+  const createdUser = await prisma.user.findUnique({
+    where: { authUserId },
+    select: { id: true }
+  });
+
+  if (!createdUser) {
+    invalidAdminUser();
+  }
+
+  redirect(adminUserPath(createdUser.id, "created=user"));
+}
+
+export async function updateAdminManagedUser(formData: FormData) {
+  const { actor, prisma } = await requireAdminUserManager();
+  const actorRole = actor.role as Role;
+  const parsed = z
+    .object({
+      userId: uuidSchema,
+      displayName: displayNameSchema,
+      role: managedRoleSchema,
+      status: userStatusSchema,
+      password: z.union([passwordSchema, z.literal("")])
+    })
+    .safeParse({
+      userId: getString(formData, "userId"),
+      displayName: getString(formData, "displayName"),
+      role: getString(formData, "role"),
+      status: getString(formData, "status"),
+      password: getString(formData, "password")
+    });
+
+  if (!parsed.success) {
+    invalidAdminUser(getString(formData, "userId"));
+  }
+
+  if (!canCreateRole(actorRole, parsed.data.role)) {
+    forbiddenAdminUser(parsed.data.userId);
+  }
+
+  const before = await getAdminManagedUserOrRedirect({
+    actor,
+    prisma,
+    userId: parsed.data.userId
+  });
+  const supabaseAdmin = createAdminClient();
+  const beforeAuthPayload = authUserPayload({
+    displayName: before.displayName,
+    role: before.role,
+    status: before.status
+  });
+  const nextAuthPayload = {
+    ...authUserPayload({
+      displayName: parsed.data.displayName,
+      role: parsed.data.role,
+      status: parsed.data.status
+    }),
+    ...(parsed.data.password
+      ? {
+          password: parsed.data.password
+        }
+      : {})
+  };
+  const { error: authUpdateError } = await supabaseAdmin.auth.admin.updateUserById(
+    before.authUserId,
+    nextAuthPayload
+  );
+
+  if (authUpdateError) {
+    invalidAdminUser(before.id);
+  }
+
+  try {
+    const after = await prisma.user.update({
+      where: { id: before.id },
+      data: {
+        displayName: parsed.data.displayName,
+        role: parsed.data.role,
+        status: parsed.data.status
+      },
+      include: {
+        memberships: {
+          include: {
+            organization: true
+          }
+        }
+      }
+    });
+
+    await writeAuditLog(prisma, {
+      actorUserId: actor.id,
+      action: "user.update",
+      entityType: "user",
+      entityId: after.id,
+      organizationId: null,
+      before: userSnapshot(before),
+      after: userSnapshot(after)
+    });
+  } catch (updateError) {
+    await supabaseAdmin.auth.admin.updateUserById(
+      before.authUserId,
+      beforeAuthPayload
+    );
+    throw updateError;
+  }
+
+  revalidateUsers(actorRole);
+  redirect(adminUserPath(before.id, "updated=user"));
 }
 
 export async function createManagedUser(formData: FormData) {
